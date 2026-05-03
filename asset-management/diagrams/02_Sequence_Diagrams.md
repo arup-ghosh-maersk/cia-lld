@@ -14,9 +14,9 @@ sequenceDiagram
     participant API as Asset API
     participant AB as Asset Business Service
     participant DB as Database
-    participant ES as EventStore
-    participant ED as EventDispatcher
-    participant AEH as AssetEventHandler    participant Audit as AuditStore
+    participant ES as EventStore    participant ED as EventDispatcher
+    participant AEH as AssetEventHandler
+    participant Audit as AuditStore
     participant Push as Notification
 
     User->>UI: Fill form & Submit
@@ -223,12 +223,12 @@ sequenceDiagram
             
             alt Threat Detected
                 DH->>DB: UpdateAttachment {status=ThreatDetected}
-                DH->>DB: UpdateDocumentScan {status=ThreatDetected}
-            else Clean
+                DH->>DB: UpdateDocumentScan {status=ThreatDetected}            else Clean
                 DH->>DB: UpdateAttachment {status=Clean}
                 DH->>DB: UpdateDocumentScan {status=Clean}
             else Failed
-                DH->>DB: UpdateDocumentScan {status=Failed}            end
+                DH->>DB: UpdateDocumentScan {status=Failed}
+            end
             break Exit Loop
         end
     end
