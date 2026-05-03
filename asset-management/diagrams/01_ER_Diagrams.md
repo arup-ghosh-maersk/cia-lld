@@ -28,55 +28,51 @@ erDiagram
     ATTACHMENT ||--o{ DOCUMENT_SCAN : "scanned_by"
     TEMPLATE_COMPONENT ||--o{ MASTER_COMPONENT : "sourced_from"
     TEMPLATE_ATTACHMENT ||--o{ MASTER_ATTACHMENT : "sourced_from"
-    ASSET_EVENT_STORE ||--o{ ASSET_AUDIT : "produces"
-    ASSET_AUDIT ||--o{ NOTIFICATION_LOG : "dispatched_as"
+    ASSET_EVENT_STORE ||--o{ ASSET_AUDIT : "produces"    ASSET_AUDIT ||--o{ NOTIFICATION_LOG : "dispatched_as"
 
     ASSET_TEMPLATE {
-        uuid id PK
+        uuid id PK "GOS Register Template ID"
         uuid parent_template_id FK "null for root"
-        string template_code UK
-        string template_name
-        string description
-        string category
-        string functional_type
-        string hierarchy_path
-        int hierarchy_level
-        string status
-        jsonb metadata
+        string gos_object_type UK "AG, AGV, AMS, etc - Primary GOS identifier"
+        string gos_object_id UK "AG#####, AGV#####, AMS##### - Full GOS Object ID"
+        string gos_lv1_code "AG, AGV, AMS - Level 1"
+        string gos_lv2_code "02, 03, 09, 24, 27, 80, 99 - Level 2"
+        string gos_lv3_code "002, 010, 031, 083, 141, 213 - Level 3"
+        string gos_lv4_code "072, 100, 158, 200, 230 - Level 4"
+        string gos_lv5_code "119, P001, P002 - Level 5"
+        int gos_object_level "200=Lv1, 300=Lv2, 400=Lv3, 500=Lv4, 600=Lv5"
+        string gos_category "EQ, TOOL, CIV, FUEL"
+        string gos_functional_type "Functional, Tool, Serial, Structural"
+        string gos_equipment_type "Instrument, Electrical, Rotary, Static, Hydraulic, Structural"
+        string gos_hierarchy_path "AG.02.131.100"
+        int gos_hierarchy_level "1, 2, 3, 4, 5"
+        string gos_parent_object_id "Parent GOS Object ID"
+        boolean gos_is_tool "0=Equipment, 1=Tool"
+        string template_name "Display name for this GOS template"
+        string template_description "Description of template"
+        string status "active, inactive, deprecated"
+        jsonb gos_metadata "Additional GOS properties"
+        jsonb metadata "Extensible metadata"
         uuid created_by
         timestamp created_at
         uuid updated_by
         timestamp updated_at
-    }    ASSET_MASTER {
+    }
+
+    ASSET_MASTER {
         uuid id PK
-        uuid asset_template_id FK
-        uuid parent_asset_id FK "null for root"
-        string asset_code UK
-        string asset_name
-        string asset_type
-        string description
-        string serial_number
-        string manufacturer
-        string model
-        string location
-        string department
-        string owner_user_id
-        string status
-        string gos_object_type "AG, AGV, AMS, etc from GOS"
-        string gos_object_id "AG#####, AGV#####, AMS#####"
-        string gos_lv1_code "AG, AGV, AMS - L1 identifier"
-        string gos_lv2_code "02, 03, 09, 24, 27, 80, 99 - L2 identifier"
-        string gos_lv3_code "002, 010, 031, 083, 141, 213 - L3 identifier"
-        string gos_lv4_code "072, 100, 158, 200, 230 - L4 identifier"
-        string gos_lv5_code "119, P001, P002 - L5 identifier"
-        int gos_object_level "200=Lv1, 300=Lv2, 400=Lv3, 500=Lv4, 600=Lv5"
-        string gos_category "EQ, TOOL, CIV, FUEL"
-        string gos_functional_type "Functional, Tool, Serial, Structural"
-        string gos_equipment_type "Instrument, Electrical & Electronics, Rotary & Dynamic, Static, Hydraulic & Piping, Structural"
-        string gos_hierarchy_path "AG.02.131.100"
-        int gos_hierarchy_level "1, 2, 3, 4, 5"
-        string gos_parent_object_id "Parent GOS Object ID"
-        boolean gos_is_tool "0 or 1 - Tool flag"
+        uuid asset_template_id FK "Reference to GOS Template"
+        uuid parent_asset_id FK "Null for root assets"
+        string asset_code UK "Unique asset instance identifier"
+        string asset_name "Instance-specific name"
+        string asset_description "Instance-specific description"
+        string serial_number "Physical serial number"
+        string manufacturer "Equipment manufacturer"
+        string model "Equipment model"
+        string location "Current physical location"
+        string department "Owning department"
+        string owner_user_id "Asset owner"
+        string status "active, inactive, retired, maintenance"
         date installation_date
         date commissioning_date
         date warranty_end_date
@@ -85,11 +81,10 @@ erDiagram
         decimal acquisition_cost
         string acquisition_currency
         decimal current_value
-        string asset_class
-        string sub_class
-        string criticality_level
+        string asset_class "Classification based on template"
+        string sub_class "Sub-classification"
+        string criticality_level "critical, high, medium, low"
         boolean is_active
-        jsonb gos_metadata "Additional GOS properties"
         jsonb metadata
         uuid created_by
         timestamp created_at
