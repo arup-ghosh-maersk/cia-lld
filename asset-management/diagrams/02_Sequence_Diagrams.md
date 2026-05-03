@@ -28,12 +28,11 @@ sequenceDiagram
 
     AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
     ES-->>API: Event Stored, EventId
-    API-->>UI: 201 Created
-
-    Note over ES,Push: Async Event Dispatch Processing
+    API-->>UI: 201 Created    Note over ES,Push: Async Event Dispatch Processing
     ES->>ED: PublishEvent(AssetCreated)
     ED->>ED: ResolveHandlers(event)
-    ED->>AEH: ExecuteHandlerAsync(event)    AEH->>AEH: HandleAssetCreate(event)
+    ED->>AEH: ExecuteHandlerAsync(event)
+    AEH->>AEH: HandleAssetCreate(event)
     AEH->>AEH: GenerateAuditMessage()
     AEH->>Audit: LogAudit(assetCreated, handler="AssetEventHandler", detail={...})
     Audit-->>AEH: AuditRecord Created
@@ -245,8 +244,7 @@ sequenceDiagram
     ES->>ED: PublishEvent(DocumentScanCompleted)
     ED->>ED: ResolveHandlers(DocumentScanCompleted)
     ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
-    
-    NH->>Audit: LogNotification(handler="NotificationHandler", result)
+      NH->>Audit: LogNotification(handler="NotificationHandler", result)
     Audit-->>NH: Logged
     NH->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
     UI-->>User: Display result
