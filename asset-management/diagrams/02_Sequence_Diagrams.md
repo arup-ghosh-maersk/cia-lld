@@ -108,7 +108,9 @@ sequenceDiagram
     
     ES->>ED: PublishEvent(event)
     ED->>ED: ResolveHandlers(event)
-    Note over ED: Check CanHandle() for each handler    par Parallel Execution
+    Note over ED: Check CanHandle() for each handler
+
+    par Parallel Execution
         ED->>AEH: ExecuteHandlerAsync(event)
         AEH->>AA: LogAudit(eventDetails, handler="AssetEventHandler")
         AA-->>AEH: AuditRecord
@@ -146,7 +148,9 @@ sequenceDiagram
 
     ED->>NH: HandleAsync(event)
     NH->>NH: ResolveChannels(recipients)
-    Note over NH: Determine channels (UI, Email)    par UI Push
+    Note over NH: Determine channels (UI, Email)
+
+    par UI Push
         NH->>SIGNALR: SendAsync(message, recipient)
         SIGNALR->>UI: SignalR Push — "Asset ASSET001 Updated"
         UI-->>SIGNALR: Acknowledged
@@ -179,7 +183,7 @@ sequenceDiagram
     participant VOTIRO as Votiro CDR API
     participant DB as Database
     participant ED as EventDispatcher
-    participant NH as NotificationHandler
+    participant Audit as AuditStore
 
     User->>UI: Upload file (e.g. Manual.pdf)
     UI->>API: POST /api/v1/assets/{assetId}/attachments
@@ -216,12 +220,12 @@ sequenceDiagram
                 DH->>DB: UpdateDocumentScan {status=Failed}
             end
         end
-    end    DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
+    end
+
+    DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
     Audit-->>DH: Logged
     DH->>ED: PublishEvent(ScanCompleted)
-    ED->>NH: DispatchAsync(event)
-    NH->>Audit: LogNotification(handler="NotificationHandler", result)
-    Audit-->>NH: Logged
-    NH->>UI: SendNotification(scanResult)
+    ED->>Audit: PublishEvent → NotificationHandler
+    Audit-->>ED: Event Published
     UI-->>User: ✅/❌ "Manual.pdf scan complete"
 ```
