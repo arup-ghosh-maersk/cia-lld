@@ -12,7 +12,7 @@ sequenceDiagram
     participant UI as Asset UI
     participant API as Asset API
     participant AB as Asset Business Service
-    participant DB as Database
+    participant DB as Asset DB
     participant ES as EventStore
     participant ED as EventDispatcher
     participant AEH as AssetEventHandler
@@ -52,7 +52,7 @@ sequenceDiagram
     participant UI as Asset UI
     participant API as Asset API
     participant AB as Asset Business Service
-    participant DB as Database
+    participant DB as Asset DB
     participant ES as EventStore
     participant ED as EventDispatcher
     participant AEH as AssetEventHandler
@@ -179,7 +179,7 @@ sequenceDiagram
     participant API as Asset API
     participant DH as DocumentHandler
     participant VOTIRO as Votiro CDR API
-    participant DB as Database
+    participant DB as Attachment DB
     participant ES as EventStore
 
     User->>UI: Upload file Manual.pdf
@@ -202,7 +202,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant DH as DocumentHandler
-    participant DB as Database
+    participant DB as Attachment DB
     participant VOTIRO as Votiro CDR API
     participant ES as EventStore
 
