@@ -47,9 +47,7 @@ erDiagram
         timestamp created_at
         uuid updated_by
         timestamp updated_at
-    }
-
-    ASSET_MASTER {
+    }    ASSET_MASTER {
         uuid id PK
         uuid asset_template_id FK
         uuid parent_asset_id FK "null for root"
@@ -64,6 +62,21 @@ erDiagram
         string department
         string owner_user_id
         string status
+        string gos_object_type "AG, AGV, AMS, etc from GOS"
+        string gos_object_id "AG#####, AGV#####, AMS#####"
+        string gos_lv1_code "AG, AGV, AMS - L1 identifier"
+        string gos_lv2_code "02, 03, 09, 24, 27, 80, 99 - L2 identifier"
+        string gos_lv3_code "002, 010, 031, 083, 141, 213 - L3 identifier"
+        string gos_lv4_code "072, 100, 158, 200, 230 - L4 identifier"
+        string gos_lv5_code "119, P001, P002 - L5 identifier"
+        int gos_object_level "200=Lv1, 300=Lv2, 400=Lv3, 500=Lv4, 600=Lv5"
+        string gos_category "EQ, TOOL, CIV, FUEL"
+        string gos_functional_type "Functional, Tool, Serial, Structural"
+        string gos_equipment_type "Instrument, Electrical & Electronics, Rotary & Dynamic, Static, Hydraulic & Piping, Structural"
+        string gos_hierarchy_path "AG.02.131.100"
+        int gos_hierarchy_level "1, 2, 3, 4, 5"
+        string gos_parent_object_id "Parent GOS Object ID"
+        boolean gos_is_tool "0 or 1 - Tool flag"
         date installation_date
         date commissioning_date
         date warranty_end_date
@@ -76,6 +89,7 @@ erDiagram
         string sub_class
         string criticality_level
         boolean is_active
+        jsonb gos_metadata "Additional GOS properties"
         jsonb metadata
         uuid created_by
         timestamp created_at
