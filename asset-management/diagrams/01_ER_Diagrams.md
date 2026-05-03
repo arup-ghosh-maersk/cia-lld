@@ -344,25 +344,41 @@ erDiagram
     ASSET_MASTER ||--o{ ASSET_MASTER : "parent_of"
 
     ASSET_TEMPLATE {
-        uuid id PK
-        uuid parent_template_id FK
-        string object_id UK
-        string object_type
-        int object_level
-        string category
-        string functional_type
-        string hierarchy_path
+        uuid id PK "GOS Register Template ID"
+        uuid parent_template_id FK "null for root"
+        string gos_object_type UK "AG, AGV, AMS - Primary GOS identifier"
+        string gos_object_id UK "AG#####, AGV##### - Full GOS Object ID"
+        string gos_lv1_code "AG, AGV, AMS - Level 1"
+        string gos_lv2_code "02, 03, 09 - Level 2"
+        string gos_lv3_code "002, 010, 031 - Level 3"
+        string gos_lv4_code "072, 100, 158 - Level 4"
+        string gos_lv5_code "119, P001, P002 - Level 5"
+        int gos_object_level "200=Lv1, 300=Lv2, 400=Lv3, 500=Lv4, 600=Lv5"
+        string gos_category "EQ, TOOL, CIV, FUEL"
+        string gos_functional_type "Functional, Tool, Serial, Structural"
+        string gos_equipment_type "Instrument, Electrical, Rotary, Static, Hydraulic, Structural"
+        string gos_hierarchy_path "AG.02.131.100"
+        int gos_hierarchy_level "1, 2, 3, 4, 5"
+        string gos_parent_object_id "Parent GOS Object ID"
+        boolean gos_is_tool "0=Equipment, 1=Tool"
+        string template_name "Display name"
+        string status "active, inactive, deprecated"
     }
 
     ASSET_MASTER {
         uuid id PK
-        uuid asset_template_id FK
-        uuid parent_asset_id FK
-        string asset_code UK
-        string name
-        string serial_number
-        string status
+        uuid asset_template_id FK "Reference to GOS Template"
+        uuid parent_asset_id FK "Null for root"
+        string asset_code UK "Unique asset instance"
+        string asset_name "Instance-specific name"
+        string serial_number "Physical serial number"
+        string location "Physical location"
+        string owner_user_id "Asset owner"
+        string status "active, inactive, retired"
         date installation_date
+        date commissioning_date
+        decimal acquisition_cost
+        boolean is_active
     }
 ```
 
