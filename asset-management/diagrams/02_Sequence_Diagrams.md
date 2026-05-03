@@ -224,8 +224,12 @@ sequenceDiagram
 
     DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
     Audit-->>DH: Logged
-    DH->>ED: PublishEvent(ScanCompleted)
-    ED->>Audit: PublishEvent → NotificationHandler
-    Audit-->>ED: Event Published
-    UI-->>User: ✅/❌ "Manual.pdf scan complete"
+
+    Note over DH,ED: Publish Completion Event
+    DH->>ED: PublishEvent(ScanCompleted, correlationId)
+    ED->>ED: ResolveHandlers(ScanCompleted)
+    ED->>Audit: LogAudit(handler="NotificationHandler", scan_result)
+    Audit-->>ED: Logged
+    ED->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
+    UI-->>User: Display result
 ```
