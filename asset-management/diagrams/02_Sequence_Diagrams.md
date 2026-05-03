@@ -24,11 +24,11 @@ sequenceDiagram
     UI->>API: POST /api/v1/assets
     API->>AB: ValidateAndCreate(assetData)
     AB->>DB: INSERT Asset
-    DB-->>AB: AssetId: ASSET001
-
-    AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
+    DB-->>AB: AssetId: ASSET001    AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
     ES-->>API: Event Stored, EventId
-    API-->>UI: 201 Created    Note over ES,Push: Async Event Dispatch Processing
+    API-->>UI: 201 Created
+
+    Note over ES,Push: Async Event Dispatch Processing
     ES->>ED: PublishEvent(AssetCreated)
     ED->>ED: ResolveHandlers(event)
     ED->>AEH: ExecuteHandlerAsync(event)
@@ -238,13 +238,11 @@ sequenceDiagram
     ES-->>DH: Event Stored
     
     DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
-    Audit-->>DH: Logged
-
-    Note over ES,NH: EventDispatcher routes to NotificationHandler
+    Audit-->>DH: Logged    Note over ES,NH: EventDispatcher routes to NotificationHandler
     ES->>ED: PublishEvent(DocumentScanCompleted)
     ED->>ED: ResolveHandlers(DocumentScanCompleted)
     ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
-      NH->>Audit: LogNotification(handler="NotificationHandler", result)
+    NH->>Audit: LogNotification(handler="NotificationHandler", result)
     Audit-->>NH: Logged
     NH->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
     UI-->>User: Display result
