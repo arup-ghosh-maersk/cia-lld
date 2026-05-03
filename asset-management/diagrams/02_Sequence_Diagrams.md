@@ -206,14 +206,12 @@ sequenceDiagram
 
     DH-->>API: Submitted for Scan
     API-->>UI: 202 Accepted {attachmentId, correlationId}
-    UI-->>User: ⏳ "File submitted for scanning..."
-
-    Note over DH,NH: Async Polling & Notification
+    UI-->>User: ⏳ "File submitted for scanning..."    Note over DH,NH: Async Polling & Notification
     loop Poll Every N Seconds
         DH->>DB: GetDocumentScan(correlationId)
         DB-->>DH: DocumentScan {status, pollingAttempts}
         
-        alt Status Not Complete
+        alt Scan Complete
             DH->>VOTIRO: GetScanResultAsync(correlationId)
             VOTIRO-->>DH: ScanResult {status, threat}
             
