@@ -33,15 +33,13 @@ sequenceDiagram
     Note over ES,Push: Async Event Dispatch Processing
     ES->>ED: PublishEvent(AssetCreated)
     ED->>ED: ResolveHandlers(event)
-    ED->>AEH: ExecuteHandlerAsync(event)
-    AEH->>AEH: HandleAssetCreate(event)
+    ED->>AEH: ExecuteHandlerAsync(event)    AEH->>AEH: HandleAssetCreate(event)
     AEH->>AEH: GenerateAuditMessage()
-    AEH->>Audit: LogAudit(assetCreated, details)
+    AEH->>Audit: LogAudit(assetCreated, handler="AssetEventHandler", detail={...})
     Audit-->>AEH: AuditRecord Created
     AEH->>Push: NotifyOnCompletion()
     Push-->>UI: Push — "Asset ASSET001 Created"
     AEH-->>ED: Handler Complete
-    ED->>Audit: LogDispatchAudit(handler=AEH, status=Success)
 ```
 
 ---
@@ -76,11 +74,10 @@ sequenceDiagram
     Note over ES,Push: Async Event Dispatch Processing
     ES->>ED: PublishEvent(AssetUpdated)
     ED->>ED: ResolveHandlers(event)
-    
-    par AssetEventHandler
+      par AssetEventHandler
         ED->>AEH: ExecuteHandlerAsync(event)
         AEH->>AEH: ExtractModifiedFields(before, after)
-        AEH->>Audit: LogAudit(fieldChanges)
+        AEH->>Audit: LogAudit(fieldChanges, handler="AssetEventHandler")
         Audit-->>AEH: AuditRecord Created
         AEH-->>ED: Handler Complete
     and NotificationHandler
@@ -88,11 +85,10 @@ sequenceDiagram
         NH->>NH: ResolveChannels(recipients)
         NH->>Push: DispatchToChannels(notification)
         Push-->>NH: Dispatched
-        NH->>Audit: LogNotification()
+        NH->>Audit: LogNotification(handler="NotificationHandler", channels=[...])
         NH-->>ED: Handler Complete
     end
     
-    ED->>Audit: LogDispatchAudit(status=Success)
     Push-->>UI: Push — "Asset ASSET001 Updated"
 ```
 
@@ -112,30 +108,25 @@ sequenceDiagram
     
     ES->>ED: PublishEvent(event)
     ED->>ED: ResolveHandlers(event)
-    Note over ED: Check CanHandle() for each handler
-
-    par Parallel Execution
+    Note over ED: Check CanHandle() for each handler    par Parallel Execution
         ED->>AEH: ExecuteHandlerAsync(event)
-        AEH->>AA: LogAudit(eventDetails)
+        AEH->>AA: LogAudit(eventDetails, handler="AssetEventHandler")
         AA-->>AEH: AuditRecord
         AEH-->>ED: Success
-        ED->>AA: LogDispatchAudit(handler=AEH, status=Success)
     and
         ED->>NH: ExecuteHandlerAsync(event)
-        NH->>AA: LogNotification()
+        NH->>AA: LogNotification(handler="NotificationHandler")
         AA-->>NH: Logged
         NH-->>ED: Success
-        ED->>AA: LogDispatchAudit(handler=NH, status=Success)
     and
         ED->>DH: ExecuteHandlerAsync(event)
-        DH->>AA: LogScan()
+        DH->>AA: LogScan(handler="DocumentHandler")
         AA-->>DH: Logged
         DH-->>ED: Success
-        ED->>AA: LogDispatchAudit(handler=DH, status=Success)
     end
 
     ED-->>ES: Dispatch Complete
-    Note over AA: All dispatch activities logged
+    Note over AA: All audit activities logged to ASSET_AUDIT
 ```
 
 ---
@@ -155,20 +146,18 @@ sequenceDiagram
 
     ED->>NH: HandleAsync(event)
     NH->>NH: ResolveChannels(recipients)
-    Note over NH: Determine channels (UI, Email)
-
-    par UI Push
+    Note over NH: Determine channels (UI, Email)    par UI Push
         NH->>SIGNALR: SendAsync(message, recipient)
         SIGNALR->>UI: SignalR Push — "Asset ASSET001 Updated"
         UI-->>SIGNALR: Acknowledged
-        SIGNALR->>NL: LogSuccess(channel=UI)
+        SIGNALR->>NL: LogNotification(handler="NotificationHandler", channel="UI_PUSH")
         NL-->>SIGNALR: Logged
         SIGNALR-->>NH: true
     and Email
         NH->>EMAIL: SendAsync(message, recipient)
         EMAIL->>EMAILSVC: SendEmailAsync(template, recipient)
         EMAILSVC-->>EMAIL: Delivered
-        EMAIL->>NL: LogSuccess(channel=Email)
+        EMAIL->>NL: LogNotification(handler="NotificationHandler", channel="EMAIL")
         NL-->>EMAIL: Logged
         EMAIL-->>NH: true
     end
@@ -227,10 +216,12 @@ sequenceDiagram
                 DH->>DB: UpdateDocumentScan {status=Failed}
             end
         end
-    end
-
+    end    DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
+    Audit-->>DH: Logged
     DH->>ED: PublishEvent(ScanCompleted)
     ED->>NH: DispatchAsync(event)
+    NH->>Audit: LogNotification(handler="NotificationHandler", result)
+    Audit-->>NH: Logged
     NH->>UI: SendNotification(scanResult)
     UI-->>User: ✅/❌ "Manual.pdf scan complete"
 ```

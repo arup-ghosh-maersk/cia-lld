@@ -1,624 +1,471 @@
 <!-- filepath: 02_DISPATCH_AUDIT_EXPLAINED.md -->
-# LogDispatchAudit Explained — Sample Database Entries
+# Dispatch Audit Simplified — Single Table Pattern
 
-> **Purpose:** Understand what LogDispatchAudit does and see sample database entries for each sequence diagram
+> **Purpose:** Simplified audit tracking without maintaining separate dispatch_audit table
 
 ---
 
-## What is LogDispatchAudit?
+## What is Dispatch Tracking?
 
-`LogDispatchAudit` is a tracking mechanism that records **which handlers processed which events**, including execution time, status, and results.
+Instead of maintaining a separate `dispatch_audit` table, handlers log directly to **ASSET_AUDIT** with a `handler` field.
 
-**It answers:** *"What happened to this event and which handlers touched it?"*
+**It answers:** *"What happened to this event?"* (Not: "which handler processed it")
 
-### Purpose
-- ✅ Track event dispatcher workflow completion
-- ✅ Monitor handler execution for debugging
-- ✅ Create audit trail of async handler invocations
-- ✅ Identify bottlenecks or failures in the handler pipeline
-- ✅ Measure performance of individual handlers
+### Simplified Approach
+- ✅ Handlers log to ASSET_AUDIT (single source of truth)
+- ✅ No separate dispatch_audit table to maintain
+- ✅ Include handler type in audit message
+- ✅ Use structured data in `detail` field for debugging
+- ✅ Status field tracks: CREATED → DISPATCHED → COMPLETED/FAILED
 
 ### Flow
 ```
 Event → EventDispatcher → [Parallel Handlers]
-                            ├→ Handler 1 (LogAudit) → LogDispatchAudit
-                            ├→ Handler 2 (LogNotification) → LogDispatchAudit
-                            └→ Handler 3 (LogScan) → LogDispatchAudit
+                            ├→ Handler 1 → LogAudit (ASSET_AUDIT)
+                            ├→ Handler 2 → LogAudit (ASSET_AUDIT)
+                            └→ Handler 3 → LogAudit (ASSET_AUDIT)
 ```
 
 ---
 
-## Database Schema
+## Database Schema (Simplified)
+
+**ASSET_AUDIT becomes the single audit log:**
 
 ```sql
-CREATE TABLE dispatch_audit (
-    dispatch_audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_id UUID NOT NULL REFERENCES asset_event_store(event_id),
-    handler_type VARCHAR(50) NOT NULL,  
-    -- Values: AssetEventHandler, NotificationHandler, DocumentHandler
+CREATE TABLE asset_audit (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_master_id UUID NOT NULL REFERENCES asset_master(id),
+    event_id UUID REFERENCES asset_event_store(event_id),
     
-    handler_status VARCHAR(20) NOT NULL,  
-    -- Values: Success, Failed, Timeout, PartialSuccess
+    handler VARCHAR(50),  
+    -- Handler that created this audit: AssetEventHandler, NotificationHandler, etc.
     
-    execution_time_ms INT NOT NULL,  
-    -- How long the handler took to execute
+    change_type VARCHAR(50) NOT NULL,  
+    -- CREATED, UPDATED, DELETED, NOTIFIED, SCANNED, etc.
     
-    error_message VARCHAR(500),  
-    -- If failed, what was the error?
+    message TEXT NOT NULL,  
+    -- Human-readable message
     
-    dispatched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  
-    -- When EventDispatcher sent to handler
+    detail JSONB,  
+    -- Structured data: {handler_time_ms, status, error, etc}
     
-    completed_at TIMESTAMP,  
-    -- When handler finished executing
+    status VARCHAR(20),  
+    -- CREATED, DISPATCHED, COMPLETED, FAILED
+    
+    changed_by UUID,
+    changed_by_name VARCHAR(255),
+    changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
     INDEX idx_event_id (event_id),
-    INDEX idx_handler_type (handler_type),
-    INDEX idx_dispatched_at (dispatched_at DESC)
+    INDEX idx_handler (handler),
+    INDEX idx_changed_at (changed_at DESC)
 );
 ```
 
+**No dispatch_audit table needed** — use ASSET_AUDIT for everything.
+
 ---
 
-## Sequence Diagram #1: Asset Creation
+## Example #1: Asset Creation
 
 **Scenario:** User creates Asset ASSET001
 
-### Step-by-Step Database Entries
+### Single Audit Log (ASSET_AUDIT only)
 
-#### Step 1: Event Created
-**ASSET_EVENT_STORE:**
+**Event Created:**
 ```json
 {
   "event_id": "e123",
-  "event_type": 1,        // AssetCreated enum
-  "event_details": {
-    "asset_master_id": "asset-001",
-    "asset_code": "ASSET001",
-    "name": "Motor #123",
-    "components": [],
-    "attachments": []
-  },
-  "created_at": "2026-05-03 09:00:00.000",
-  "created_by": "user@company.com"
+  "event_type": "AssetCreated",
+  "asset_master_id": "asset-001",
+  "created_at": "2026-05-03 09:00:00.000"
 }
 ```
 
-#### Step 2: AssetEventHandler Processes Event
-**ASSET_AUDIT (Generated):**
+**AssetEventHandler logs to ASSET_AUDIT:**
 ```json
 {
-  "audit_id": "audit-001",
+  "id": "audit-001",
+  "asset_master_id": "asset-001",
   "event_id": "e123",
-  "handler_name": "AssetEventHandler",
-  "audit_message": "Created Asset ASSET001",
+  "handler": "AssetEventHandler",
+  "change_type": "CREATED",
+  "message": "Created Asset ASSET001",
+  "status": "COMPLETED",
   "detail": {
     "asset_code": "ASSET001",
     "asset_name": "Motor #123",
-    "components_added": 0,
-    "attachments_added": 0
+    "execution_time_ms": 150,
+    "result": "success"
   },
-  "status": "DISPATCHED",
+  "changed_by": "user-123",
+  "changed_by_name": "user@company.com",
   "created_at": "2026-05-03 09:00:00.050"
 }
 ```
 
-#### Step 3: EventDispatcher Logs Handler Completion
-**DISPATCH_AUDIT (Logged by EventDispatcher):**
+**NotificationHandler logs to ASSET_AUDIT:**
 ```json
 {
-  "dispatch_audit_id": "da-001",
+  "id": "audit-002",
+  "asset_master_id": "asset-001",
   "event_id": "e123",
-  "handler_type": "AssetEventHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 150,    // Handler took 150ms
-  "error_message": null,
-  "dispatched_at": "2026-05-03 09:00:00.050",
-  "completed_at": "2026-05-03 09:00:00.200",
-  "created_at": "2026-05-03 09:00:00.200"
+  "handler": "NotificationHandler",
+  "change_type": "NOTIFIED",
+  "message": "Sent UI push notification",
+  "status": "COMPLETED",
+  "detail": {
+    "channel": "UI_PUSH",
+    "recipient": "user@company.com",
+    "execution_time_ms": 45,
+    "result": "success"
+  },
+  "created_at": "2026-05-03 09:00:00.095"
 }
 ```
 
-#### Step 4: NotificationHandler Sends Notification
-**NOTIFICATION_LOG (Generated):**
-```json
-{
-  "notification_id": "notif-001",
-  "event_id": "e123",
-  "channel": "UI_PUSH",
-  "recipient": "user@company.com",
-  "message": "✅ Asset ASSET001 created",
-  "status": "SENT",
-  "sent_at": "2026-05-03 09:00:00.250",
-  "created_at": "2026-05-03 09:00:00.250"
-}
+**Query all activities for one event:**
+```sql
+SELECT handler, change_type, message, detail->>'execution_time_ms' as time_ms, changed_at
+FROM asset_audit
+WHERE event_id = 'e123'
+ORDER BY created_at ASC;
+
+RESULT:
+┌────────────────────┬──────────────┬───────────────────────────┬──────────┬──────────────┐
+│ handler            │ change_type  │ message                   │ time_ms  │ changed_at   │
+├────────────────────┼──────────────┼───────────────────────────┼──────────┼──────────────┤
+│ AssetEventHandler   │ CREATED      │ Created Asset ASSET001    │ 150      │ 09:00:00.050 │
+│ NotificationHandler │ NOTIFIED     │ Sent UI push notification │ 45       │ 09:00:00.095 │
+└────────────────────┴──────────────┴───────────────────────────┴──────────┴──────────────┘
 ```
 
 ---
 
-## Sequence Diagram #2: Asset Update
+## Example #2: Asset Update (Parallel Handlers)
 
 **Scenario:** User updates Asset ASSET001 (year: 2023 → 2024)
 
-### Database Entries
+### Multiple Handlers in ASSET_AUDIT
 
-#### Event & Audit
-**ASSET_EVENT_STORE:**
+**AssetEventHandler logs:**
 ```json
 {
+  "id": "audit-201",
+  "asset_master_id": "asset-001",
   "event_id": "e456",
-  "event_type": 2,        // AssetUpdated enum
-  "event_details": {
-    "asset_master_id": "asset-001",
-    "asset_code": "ASSET001",
-    "changes": {
-      "year": { "old": 2023, "new": 2024 }
-    },
-    "modified_fields": ["year"]
-  },
-  "created_at": "2026-05-03 10:30:00.000",
-  "created_by": "user2@company.com"
-}
-```
-
-**ASSET_AUDIT:**
-```json
-{
-  "audit_id": "audit-002",
-  "event_id": "e456",
-  "handler_name": "AssetEventHandler",
-  "audit_message": "Updated Asset ASSET001, Modified Fields: year",
+  "handler": "AssetEventHandler",
+  "change_type": "UPDATED",
+  "message": "Updated Asset ASSET001, field: year",
+  "status": "COMPLETED",
   "detail": {
-    "asset_code": "ASSET001",
     "field_name": "year",
     "old_value": "2023",
     "new_value": "2024",
-    "changed_by": "user2@company.com"
+    "execution_time_ms": 120
   },
-  "status": "DISPATCHED",
+  "changed_by_name": "user2@company.com",
   "created_at": "2026-05-03 10:30:00.050"
 }
 ```
 
-#### Parallel Handler Tracking
-**DISPATCH_AUDIT (AssetEventHandler):**
+**NotificationHandler logs (async, runs in parallel):**
 ```json
 {
-  "dispatch_audit_id": "da-002a",
-  "event_id": "e456",
-  "handler_type": "AssetEventHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 120,
-  "error_message": null,
-  "dispatched_at": "2026-05-03 10:30:00.050",
-  "completed_at": "2026-05-03 10:30:00.170",
-  "created_at": "2026-05-03 10:30:00.170"
-}
-```
-
-**DISPATCH_AUDIT (NotificationHandler):**
-```json
-{
-  "dispatch_audit_id": "da-002b",
-  "event_id": "e456",
-  "handler_type": "NotificationHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 85,
-  "error_message": null,
-  "dispatched_at": "2026-05-03 10:30:00.050",
-  "completed_at": "2026-05-03 10:30:00.135",
-  "created_at": "2026-05-03 10:30:00.135"
-}
-```
-
-#### Multi-Channel Notifications
-**NOTIFICATION_LOG (UI Push):**
-```json
-{
-  "notification_id": "notif-002a",
-  "event_id": "e456",
-  "channel": "UI_PUSH",
-  "recipient": "user@company.com",
-  "message": "Asset ASSET001 updated: year changed (2023 → 2024)",
-  "status": "SENT",
-  "sent_at": "2026-05-03 10:30:00.150",
-  "created_at": "2026-05-03 10:30:00.135"
-}
-```
-
-**NOTIFICATION_LOG (Email):**
-```json
-{
-  "notification_id": "notif-002b",
-  "event_id": "e456",
-  "channel": "EMAIL",
-  "recipient": "user@company.com",
-  "message": "Asset ASSET001 updated: year changed (2023 → 2024)",
-  "status": "SENT",
-  "retry_count": 0,
-  "sent_at": "2026-05-03 10:30:00.350",
-  "created_at": "2026-05-03 10:30:00.135"
-}
-```
-
----
-
-## Sequence Diagram #3: EventDispatcher Coordination
-
-**Scenario:** Single event processed by all 3 handlers in parallel
-
-### Database Entries
-
-**DISPATCH_AUDIT - All 3 Handlers:**
-
-*Handler #1 - AssetEventHandler (Fastest):*
-```json
-{
-  "dispatch_audit_id": "da-003a",
-  "event_id": "e789",
-  "handler_type": "AssetEventHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 145,
-  "error_message": null,
-  "dispatched_at": "2026-05-03 11:00:00.000",
-  "completed_at": "2026-05-03 11:00:00.145"
-}
-```
-
-*Handler #2 - NotificationHandler (Medium):*
-```json
-{
-  "dispatch_audit_id": "da-003b",
-  "event_id": "e789",
-  "handler_type": "NotificationHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 95,
-  "error_message": null,
-  "dispatched_at": "2026-05-03 11:00:00.000",
-  "completed_at": "2026-05-03 11:00:00.095"
-}
-```
-
-*Handler #3 - DocumentHandler (Slowest):*
-```json
-{
-  "dispatch_audit_id": "da-003c",
-  "event_id": "e789",
-  "handler_type": "DocumentHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 200,
-  "error_message": null,
-  "dispatched_at": "2026-05-03 11:00:00.000",
-  "completed_at": "2026-05-03 11:00:00.200"
-}
-```
-
-### Sample Query Result
-```sql
-SELECT handler_type, handler_status, execution_time_ms, completed_at
-FROM dispatch_audit
-WHERE event_id = 'e789'
-ORDER BY completed_at ASC;
-
-RESULT:
-┌────────────────────┬────────────────┬──────────────────┬─────────────────────────────┐
-│ handler_type       │ handler_status │ execution_time_ms │ completed_at                │
-├────────────────────┼────────────────┼──────────────────┼─────────────────────────────┤
-│ NotificationHandler │ Success        │ 95               │ 2026-05-03 11:00:00.095     │
-│ AssetEventHandler   │ Success        │ 145              │ 2026-05-03 11:00:00.145     │
-│ DocumentHandler     │ Success        │ 200              │ 2026-05-03 11:00:00.200     │
-└────────────────────┴────────────────┴──────────────────┴─────────────────────────────┘
-
-NOTE: All handlers started at 11:00:00.000
-      Slowest handler (DocumentHandler) finished at 11:00:00.200
-      Total dispatch time: 200ms
-```
-
----
-
-## Sequence Diagram #4: Notification Multi-Channel
-
-**Scenario:** Notification sent via UI and Email
-
-### Database Entries
-
-**NOTIFICATION_LOG (UI Channel):**
-```json
-{
-  "notification_id": "notif-004a",
-  "event_id": "e012",
-  "channel": "UI_PUSH",
-  "recipient": "user@company.com",
-  "message": "Asset ASSET001 updated",
-  "status": "SENT",
-  "retry_count": 0,
-  "error_message": null,
-  "sent_at": "2026-05-03 12:00:00.050",
-  "created_at": "2026-05-03 12:00:00.000"
-}
-```
-
-**NOTIFICATION_LOG (Email Channel):**
-```json
-{
-  "notification_id": "notif-004b",
-  "event_id": "e012",
-  "channel": "EMAIL",
-  "recipient": "user@company.com",
-  "message": "Asset ASSET001 updated",
-  "status": "SENT",
-  "retry_count": 0,
-  "error_message": null,
-  "sent_at": "2026-05-03 12:00:00.250",
-  "created_at": "2026-05-03 12:00:00.000"
-}
-```
-
-### Query: Channel Performance
-```sql
-SELECT 
-  channel,
-  COUNT(*) as total_sent,
-  AVG(EXTRACT(EPOCH FROM (sent_at - created_at))) as avg_latency_seconds,
-  MAX(EXTRACT(EPOCH FROM (sent_at - created_at))) as max_latency_seconds
-FROM notification_log
-WHERE created_at > NOW() - INTERVAL '1 day'
-GROUP BY channel;
-
-RESULT:
-┌──────────┬────────────┬──────────────────────┬─────────────────────┐
-│ channel  │ total_sent │ avg_latency_seconds  │ max_latency_seconds │
-├──────────┼────────────┼──────────────────────┼─────────────────────┤
-│ UI_PUSH  │ 4521       │ 0.08                 │ 0.25                │
-│ EMAIL    │ 4521       │ 2.15                 │ 5.30                │
-└──────────┴────────────┴──────────────────────┴─────────────────────┘
-```
-
----
-
-## Sequence Diagram #5: Document Upload & Votiro Scan
-
-**Scenario:** User uploads Manual.pdf, Votiro scans and returns CLEAN
-
-### Database Entries
-
-#### Step 1: File Uploaded
-**ASSET_EVENT_STORE:**
-```json
-{
-  "event_id": "e345",
-  "event_type": 5,        // FileUploaded enum
-  "event_details": {
-    "asset_master_id": "asset-001",
-    "attachment_id": "att-001",
-    "file_name": "Manual.pdf",
-    "file_size": 2048000,
-    "content_type": "application/pdf",
-    "correlation_id": "votiro-corr-xyz789"
-  },
-  "created_at": "2026-05-03 13:00:00.000",
-  "created_by": "user@company.com"
-}
-```
-
-#### Step 2: Attachment Recorded
-**ATTACHMENT:**
-```json
-{
-  "attachment_id": "att-001",
+  "id": "audit-202",
   "asset_master_id": "asset-001",
-  "file_name": "Manual.pdf",
-  "file_size": 2048000,
-  "mime_type": "application/pdf",
-  "correlation_id": "votiro-corr-xyz789",
-  "scan_status": "PENDING",
-  "created_at": "2026-05-03 13:00:00.000"
-}
-```
-
-#### Step 3: DocumentHandler Starts Polling
-**DOCUMENT_SCAN (Initial):**
-```json
-{
-  "scan_id": "scan-001",
-  "attachment_id": "att-001",
-  "correlation_id": "votiro-corr-xyz789",
-  "scan_status": "SUBMITTED",
-  "polling_attempts": 0,
-  "last_polled_at": null,
-  "created_at": "2026-05-03 13:00:00.050"
-}
-```
-
-#### Step 4: After Polling Completes (CLEAN)
-**DOCUMENT_SCAN (Final):**
-```json
-{
-  "scan_id": "scan-001",
-  "attachment_id": "att-001",
-  "correlation_id": "votiro-corr-xyz789",
-  "scan_status": "CLEAN",
-  "scan_result_detail": {
-    "threat_detected": false,
-    "threat_name": null,
-    "risk_level": 0,
-    "scan_duration": "2500ms",
-    "processed_at": "2026-05-03 13:00:02.500"
+  "event_id": "e456",
+  "handler": "NotificationHandler",
+  "change_type": "NOTIFIED",
+  "message": "Sent notifications via 2 channels",
+  "status": "COMPLETED",
+  "detail": {
+    "channels": ["UI_PUSH", "EMAIL"],
+    "recipients": 1,
+    "execution_time_ms": 85
   },
-  "polling_attempts": 3,
-  "last_polled_at": "2026-05-03 13:00:02.500",
-  "updated_at": "2026-05-03 13:00:02.550"
+  "created_at": "2026-05-03 10:30:00.135"
 }
 ```
 
-#### Step 5: EventDispatcher Logs DocumentHandler
-**DISPATCH_AUDIT (DocumentHandler):**
-```json
-{
-  "dispatch_audit_id": "da-005",
-  "event_id": "e345",
-  "handler_type": "DocumentHandler",
-  "handler_status": "Success",
-  "execution_time_ms": 2650,    // Includes polling time!
-  "error_message": null,
-  "dispatched_at": "2026-05-03 13:00:00.050",
-  "completed_at": "2026-05-03 13:00:02.700",
-  "created_at": "2026-05-03 13:00:02.700"
-}
-```
+**Query to see both handlers' work:**
+```sql
+SELECT handler, change_type, message, detail->>'execution_time_ms' as time_ms
+FROM asset_audit
+WHERE event_id = 'e456'
+ORDER BY created_at ASC;
 
-#### Step 6: Notification Sent
-**NOTIFICATION_LOG:**
-```json
-{
-  "notification_id": "notif-005",
-  "event_id": "e345",
-  "channel": "UI_PUSH",
-  "recipient": "user@company.com",
-  "message": "✅ Manual.pdf scan complete - File is clean",
-  "status": "SENT",
-  "sent_at": "2026-05-03 13:00:02.750",
-  "created_at": "2026-05-03 13:00:02.700"
-}
+RESULT:
+┌────────────────────┬──────────────┬──────────────────────────────────────┬─────────┐
+│ handler            │ change_type  │ message                              │ time_ms │
+├────────────────────┼──────────────┼──────────────────────────────────────┼─────────┤
+│ AssetEventHandler   │ UPDATED      │ Updated Asset ASSET001, field: year  │ 120     │
+│ NotificationHandler │ NOTIFIED     │ Sent notifications via 2 channels    │ 85      │
+└────────────────────┴──────────────┴──────────────────────────────────────┴─────────┘
+
+Total execution time: max(120, 85) = 120ms (parallel execution)
 ```
 
 ---
 
-## Useful Queries
+## Example #3: Multiple Handlers (3-Way Parallel)
 
-### Query 1: Performance Analysis
+**Scenario:** Single event processed by AssetEventHandler, NotificationHandler, DocumentHandler
+
+### All Logged in ASSET_AUDIT
+
+**AssetEventHandler:**
+```json
+{
+  "id": "audit-301",
+  "asset_master_id": "asset-001",
+  "event_id": "e789",
+  "handler": "AssetEventHandler",
+  "change_type": "CREATED",
+  "message": "Asset event logged",
+  "detail": { "execution_time_ms": 145, "result": "success" },
+  "created_at": "2026-05-03 11:00:00.145"
+}
+```
+
+**NotificationHandler:**
+```json
+{
+  "id": "audit-302",
+  "asset_master_id": "asset-001",
+  "event_id": "e789",
+  "handler": "NotificationHandler",
+  "change_type": "NOTIFIED",
+  "message": "Notifications sent",
+  "detail": { "execution_time_ms": 95, "channels": 2, "result": "success" },
+  "created_at": "2026-05-03 11:00:00.095"
+}
+```
+
+**DocumentHandler:**
+```json
+{
+  "id": "audit-303",
+  "asset_master_id": "asset-001",
+  "event_id": "e789",
+  "handler": "DocumentHandler",
+  "change_type": "SCANNED",
+  "message": "Document scan initiated",
+  "detail": { "execution_time_ms": 200, "correlation_id": "votiro-xyz", "result": "success" },
+  "created_at": "2026-05-03 11:00:00.200"
+}
+```
+
+**Single query shows all three:**
 ```sql
--- Identify slow handlers
+SELECT handler, change_type, detail->>'execution_time_ms' as time_ms, created_at
+FROM asset_audit
+WHERE event_id = 'e789'
+ORDER BY created_at ASC;
+
+RESULT:
+┌────────────────────┬──────────────┬─────────┬──────────────────┐
+│ handler            │ change_type  │ time_ms │ created_at       │
+├────────────────────┼──────────────┼─────────┼──────────────────┤
+│ NotificationHandler │ NOTIFIED     │ 95      │ 11:00:00.095     │
+│ AssetEventHandler   │ CREATED      │ 145     │ 11:00:00.145     │
+│ DocumentHandler     │ SCANNED      │ 200     │ 11:00:00.200     │
+└────────────────────┴──────────────┴─────────┴──────────────────┘
+
+No separate table to join!
+```
+
+---
+
+## Example #4: Document Upload & Scan
+
+**Scenario:** User uploads file, DocumentHandler polls Votiro, returns result
+
+### Document Tracking in ASSET_AUDIT
+
+**Initial upload event:**
+```json
+{
+  "id": "audit-401",
+  "asset_master_id": "asset-001",
+  "event_id": "e345",
+  "handler": "DocumentHandler",
+  "change_type": "SCANNED",
+  "message": "File uploaded to Votiro: Manual.pdf",
+  "status": "COMPLETED",
+  "detail": {
+    "file_name": "Manual.pdf",
+    "correlation_id": "votiro-corr-xyz789",
+    "file_size": 2048000,
+    "execution_time_ms": 2650,
+    "polling_attempts": 3
+  },
+  "created_at": "2026-05-03 13:00:02.700"
+}
+```
+
+**After scan completes:**
+```json
+{
+  "id": "audit-402",
+  "asset_master_id": "asset-001",
+  "event_id": "e345",
+  "handler": "NotificationHandler",
+  "change_type": "NOTIFIED",
+  "message": "Scan complete: Manual.pdf is CLEAN",
+  "status": "COMPLETED",
+  "detail": {
+    "channel": "UI_PUSH",
+    "threat_detected": false,
+    "execution_time_ms": 25
+  },
+  "created_at": "2026-05-03 13:00:02.750"
+}
+```
+
+**Complete audit trail for document:**
+```sql
+SELECT handler, change_type, message, detail
+FROM asset_audit
+WHERE event_id = 'e345'
+ORDER BY created_at ASC;
+```
+
+---
+
+## Simplified Queries
+
+Instead of joining multiple tables, query ASSET_AUDIT directly:
+
+### Query 1: All Activities for One Event
+```sql
+-- Single table, no joins
 SELECT 
-  handler_type,
+  handler, 
+  change_type, 
+  message,
+  detail->>'execution_time_ms' as time_ms,
+  status
+FROM asset_audit
+WHERE event_id = 'e123'
+ORDER BY created_at ASC;
+```
+
+### Query 2: Handler Performance
+```sql
+-- Fastest/slowest handlers
+SELECT 
+  handler,
   COUNT(*) as invocations,
-  AVG(execution_time_ms) as avg_time_ms,
-  MAX(execution_time_ms) as max_time_ms,
-  MIN(execution_time_ms) as min_time_ms
-FROM dispatch_audit
-WHERE dispatched_at > NOW() - INTERVAL '1 day'
-GROUP BY handler_type
+  AVG((detail->>'execution_time_ms')::int) as avg_time_ms,
+  MAX((detail->>'execution_time_ms')::int) as max_time_ms
+FROM asset_audit
+WHERE created_at > NOW() - INTERVAL '1 day'
+  AND detail IS NOT NULL
+GROUP BY handler
 ORDER BY avg_time_ms DESC;
 ```
 
-### Query 2: Failure Analysis
+### Query 3: Failed Operations
 ```sql
--- Check for handler failures
+-- Find failures across all handlers
 SELECT 
-  handler_type,
-  handler_status,
-  COUNT(*) as count,
-  error_message
-FROM dispatch_audit
-WHERE dispatched_at > NOW() - INTERVAL '1 day'
-  AND handler_status != 'Success'
-GROUP BY handler_type, handler_status, error_message
-ORDER BY count DESC;
-```
-
-### Query 3: Complete Event Lifecycle
-```sql
--- Track one event through entire system
-SELECT 
-  'ASSET_EVENT' as stage,
-  event_id,
-  '' as handler,
-  created_at as timestamp
-FROM asset_event_store
-WHERE event_id = 'e123'
-
-UNION ALL
-
-SELECT 
-  'ASSET_AUDIT' as stage,
-  event_id,
-  handler_name as handler,
-  created_at as timestamp
+  handler,
+  change_type,
+  message,
+  detail->>'result' as result,
+  created_at
 FROM asset_audit
-WHERE event_id = 'e123'
-
-UNION ALL
-
-SELECT 
-  'DISPATCH' as stage,
-  event_id,
-  handler_type as handler,
-  completed_at as timestamp
-FROM dispatch_audit
-WHERE event_id = 'e123'
-
-UNION ALL
-
-SELECT 
-  'NOTIFICATION' as stage,
-  event_id,
-  channel as handler,
-  sent_at as timestamp
-FROM notification_log
-WHERE event_id = 'e123'
-
-ORDER BY timestamp ASC;
+WHERE created_at > NOW() - INTERVAL '1 hour'
+  AND (status = 'FAILED' OR detail->>'result' = 'failed')
+ORDER BY created_at DESC;
 ```
 
-### Query 4: Notification Delivery Rate
+### Query 4: Notification Summary
 ```sql
--- Track notification success rate
+-- Count notifications by channel
 SELECT 
-  channel,
-  status,
-  COUNT(*) as count,
-  ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY channel), 2) as percentage
-FROM notification_log
-WHERE created_at > NOW() - INTERVAL '7 days'
-GROUP BY channel, status
-ORDER BY channel, status;
+  handler,
+  detail->>'channel' as channel,
+  COUNT(*) as count
+FROM asset_audit
+WHERE handler = 'NotificationHandler'
+  AND created_at > NOW() - INTERVAL '1 day'
+GROUP BY handler, detail->>'channel';
 ```
 
 ---
 
-## Key Insights from LogDispatchAudit
+## Benefits of Simplified Approach
 
-| Metric | What It Tells You |
-|--------|---|
-| `execution_time_ms` | How fast is this handler? Is it a bottleneck? |
-| `handler_status` | Did handler succeed or fail? |
-| `error_message` | Why did handler fail? (For debugging) |
-| `dispatched_at` → `completed_at` | What's the latency for this handler? |
-| Count of handlers for one event | How many handlers are processing this event? |
+| Aspect | Before (3+ tables) | After (1 table) |
+|--------|-------------------|-----------------|
+| **Tables** | ASSET_AUDIT, DISPATCH_AUDIT, NOTIFICATION_LOG | ASSET_AUDIT only |
+| **Joins** | Multiple for complete view | None (single table) |
+| **Queries** | Complex UNION statements | Simple SELECT |
+| **Maintenance** | 3+ schemas to maintain | 1 schema |
+| **Data consistency** | Can get out of sync | Guaranteed consistency |
+| **Query performance** | Slower (joins + unions) | Fast (single table) |
 
-### Common Use Cases
+---
 
-**Monitor Performance:**
-```sql
--- Which handler is slowest?
-SELECT handler_type, AVG(execution_time_ms) 
-FROM dispatch_audit 
-GROUP BY handler_type 
-ORDER BY 2 DESC LIMIT 1;
-```
+## Handler Implementation Pattern
 
-**Track Failures:**
-```sql
--- Did DocumentHandler fail in last hour?
-SELECT * FROM dispatch_audit
-WHERE handler_type = 'DocumentHandler'
-  AND handler_status = 'Failed'
-  AND dispatched_at > NOW() - INTERVAL '1 hour';
-```
+Each handler follows this pattern:
 
-**Audit Trail:**
-```sql
--- Show complete audit trail for one asset
-SELECT d.handler_type, d.handler_status, d.execution_time_ms, d.completed_at
-FROM dispatch_audit d
-WHERE d.event_id IN (
-  SELECT event_id FROM asset_event_store 
-  WHERE event_payload->>'asset_master_id' = 'asset-001'
-)
-ORDER BY d.completed_at DESC;
-```
+```csharp
+public class AssetEventHandler : IConsumer<AssetCreatedEvent>
+{
+    private readonly IRepository _repo;
+    private readonly ILogger _logger;
+    
+    public async Task Consume(ConsumeContext<AssetCreatedEvent> context)
+    {
+        var @event = context.Message;
+        var startTime = DateTime.UtcNow;
+        
+        try 
+        {
+            // Do work
+            await ProcessEventAsync(@event);
+            
+            // Log to ASSET_AUDIT (single table)
+            await _repo.CreateAuditAsync(new AssetAudit
+            {
+                EventId = @event.EventId,
+                Handler = "AssetEventHandler",
+                ChangeType = "CREATED",
+                Message = $"Processed asset {id}",
+                Status = "COMPLETED",
+                Detail = new 
+                { 
+                    execution_time_ms = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
+                    result = "success"
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            await _repo.CreateAuditAsync(new AssetAudit
+            {
+                EventId = @event.EventId,
+                Handler = "AssetEventHandler",
+                ChangeType = "CREATED",
+                Message = $"Error processing asset",
+                Status = "FAILED",
+                Detail = new 
+                { 
+                    execution_time_ms = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
+                    error = ex.Message,
+                    result = "failed"
+                }
+            });
+            throw;
+        }
+    }
+}
 
 ---
 
