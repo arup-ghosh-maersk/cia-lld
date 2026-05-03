@@ -18,11 +18,10 @@ sequenceDiagram
     participant ED as EventDispatcher
     participant AEH as AssetEventHandler
     participant Audit as AuditStore
-    participant Push as Notification
-
-    User->>UI: Fill form & Submit
+    participant Push as Notification    User->>UI: Fill form & Submit
     UI->>API: POST /api/v1/assets
-    API->>AB: ValidateAndCreate(assetData)    AB->>DB: INSERT Asset
+    API->>AB: ValidateAndCreate(assetData)
+    AB->>DB: INSERT Asset
     DB-->>AB: AssetId: ASSET001
 
     AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
@@ -232,12 +231,11 @@ sequenceDiagram
             end
             break Exit Loop
         end
-    end
-
-    Note over DH,ES: Emit Scan Completion Event
+    end    Note over DH,ES: Emit Scan Completion Event
     DH->>ES: EmitEvent(DocumentScanCompleted, result)
     ES-->>DH: Event Stored
-      DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
+    
+    DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
     Audit-->>DH: Logged
 
     Note over ES,NH: EventDispatcher routes to NotificationHandler
