@@ -16,9 +16,10 @@ sequenceDiagram
     participant DB as Database
     participant ES as EventStore
     participant ED as EventDispatcher
-    participant AEH as AssetEventHandler
-    participant Audit as AuditStore
-    participant Push as Notification    User->>UI: Fill form & Submit
+    participant AEH as AssetEventHandler    participant Audit as AuditStore
+    participant Push as Notification
+
+    User->>UI: Fill form & Submit
     UI->>API: POST /api/v1/assets
     API->>AB: ValidateAndCreate(assetData)
     AB->>DB: INSERT Asset
@@ -227,11 +228,12 @@ sequenceDiagram
                 DH->>DB: UpdateAttachment {status=Clean}
                 DH->>DB: UpdateDocumentScan {status=Clean}
             else Failed
-                DH->>DB: UpdateDocumentScan {status=Failed}
-            end
+                DH->>DB: UpdateDocumentScan {status=Failed}            end
             break Exit Loop
         end
-    end    Note over DH,ES: Emit Scan Completion Event
+    end
+
+    Note over DH,ES: Emit Scan Completion Event
     DH->>ES: EmitEvent(DocumentScanCompleted, result)
     ES-->>DH: Event Stored
     
