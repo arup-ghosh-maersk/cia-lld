@@ -201,12 +201,17 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
+    participant ES as EventStore
+    participant ED as EventDispatcher
     participant DH as DocumentHandler
     participant DB as Attachment DB
     participant VOTIRO as Votiro CDR API
-    participant ES as EventStore
 
-    Note over DH,DB: Background polling job
+    ES->>ED: PublishEvent(DocumentScanStarted, correlationId)
+    ED->>ED: ResolveHandlers(DocumentScanStarted)
+    ED->>DH: ExecuteHandlerAsync(DocumentScanStarted)
+
+    Note over DH,DB: EventDispatcher triggers DocumentHandler polling
 
     loop Poll every N seconds max 30 attempts
         DH->>DB: GetDocumentScan(correlationId)
@@ -222,7 +227,7 @@ sequenceDiagram
 
         DH->>ES: Emit DocumentScanCompleted
         break Stop polling
-            DH-->>DB: Polling complete
+            DH-->>ED: Handler Complete
         end
     end
 ```
