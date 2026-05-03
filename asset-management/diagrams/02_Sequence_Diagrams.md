@@ -202,11 +202,11 @@ sequenceDiagram
     DH->>DB: CreateAttachment {fileName, correlationId, status=Pending}
     DB-->>DH: Attachment Created
     DH->>DB: CreateDocumentScan {correlationId, status=Submitted}
-    DB-->>DH: DocumentScan Created
-
-    DH-->>API: Submitted for Scan
+    DB-->>DH: DocumentScan Created    DH-->>API: Submitted for Scan
     API-->>UI: 202 Accepted {attachmentId, correlationId}
-    UI-->>User: ⏳ "File submitted for scanning..."    Note over DH,NH: Async Polling & Notification
+    UI-->>User: ⏳ "File submitted for scanning..."
+
+    Note over DH,NH: Async Polling & Notification
     loop Poll Every N Seconds
         DH->>DB: GetDocumentScan(correlationId)
         DB-->>DH: DocumentScan {status, pollingAttempts}
