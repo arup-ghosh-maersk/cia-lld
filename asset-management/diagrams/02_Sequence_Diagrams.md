@@ -22,9 +22,10 @@ sequenceDiagram
 
     User->>UI: Fill form & Submit
     UI->>API: POST /api/v1/assets
-    API->>AB: ValidateAndCreate(assetData)
-    AB->>DB: INSERT Asset
-    DB-->>AB: AssetId: ASSET001    AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
+    API->>AB: ValidateAndCreate(assetData)    AB->>DB: INSERT Asset
+    DB-->>AB: AssetId: ASSET001
+
+    AB->>ES: EmitEvent {Type: AssetCreated, Details: {...}}
     ES-->>API: Event Stored, EventId
     API-->>UI: 201 Created
 
@@ -236,9 +237,10 @@ sequenceDiagram
     Note over DH,ES: Emit Scan Completion Event
     DH->>ES: EmitEvent(DocumentScanCompleted, result)
     ES-->>DH: Event Stored
-    
-    DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
-    Audit-->>DH: Logged    Note over ES,NH: EventDispatcher routes to NotificationHandler
+      DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
+    Audit-->>DH: Logged
+
+    Note over ES,NH: EventDispatcher routes to NotificationHandler
     ES->>ED: PublishEvent(DocumentScanCompleted)
     ED->>ED: ResolveHandlers(DocumentScanCompleted)
     ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
