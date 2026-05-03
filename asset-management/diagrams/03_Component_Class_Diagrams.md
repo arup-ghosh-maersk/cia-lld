@@ -15,6 +15,7 @@ graph LR
         subgraph "Core Services"
             AES[AssetEventStore]
             AB[AssetBusiness Service]
+            ED[EventDispatcher]
         end
 
         subgraph "Handler Services"
@@ -43,9 +44,13 @@ graph LR
     API -->|Validate & Persist| AB
     AB -->|Emit Event| AES
 
-    AES -->|Event Stream| AEH
+    AES -->|Retrieve Events| ED
+    ED -->|Dispatch to Handler| AEH
+    ED -->|Dispatch to Handler| NH
+    ED -->|Dispatch to Handler| DH
+    
     AEH -->|Log Audit| AUDITDB
-    AEH -->|Notify| NH
+    AEH -->|Notify via| NH
 
     NH -->|Push| SIGNALR
     NH -->|Send| EMAIL
@@ -57,13 +62,14 @@ graph LR
     DH -->|Direct Upload + Get CorrelationId| VOTIRO
     DH -->|Poll for Result| VOTIRO
     DH -->|Webhook Callback| WEBHOOK
-    WEBHOOK -->|Dispatch| NH
+    WEBHOOK -->|Dispatch| ED
     DH -->|Log Scan| AUDITDB
-    DH -->|Notify| NH
+    DH -->|Notify via| NH
 
     AB -->|Query| ASSETDB
     AUDITDB -->|Store Logs| ASSETDB
 
+    style ED fill:#c8e6c9
     style AEH fill:#e1f5ff
     style NH fill:#f3e5f5
     style DH fill:#fff3e0
@@ -136,9 +142,7 @@ classDiagram
         -detail: JsonObject
         -status: AuditStatus
         -createdAt: DateTime
-    }
-
-    AssetEventHandler --> AssetEvent
+    }    AssetEventHandler --> AssetEvent
     AssetEventHandler --> AuditRecord
     NotificationHandler --> AuditRecord
     DocumentHandler --> AuditRecord
@@ -146,7 +150,82 @@ classDiagram
 
 ---
 
-## 3. NotificationHandler Class Diagram
+## 3. EventDispatcher & Handler Coordination
+
+```mermaid
+classDiagram
+    class IEventHandler {
+        <<interface>>
+        +CanHandle(event) bool
+        +HandleAsync(event) Task
+        +GetHandlerType() HandlerType
+    }
+
+    class EventDispatcher {
+        -handlers: List~IEventHandler~
+        -logger: ILogger
+        -auditRepository: IAuditRepository
+        +RegisterHandler(handler) void
+        +DispatchAsync(event) Task
+        -ResolveHandlers(event) List~IEventHandler~
+        -ExecuteHandlerAsync(handler, event) Task
+        -LogDispatchAudit(event, handler, result) Task
+    }
+
+    class AssetEventHandler {
+        +CanHandle(event) bool
+        +HandleAsync(event) Task
+        +GetHandlerType() HandlerType
+        -HandleAssetCreate(event) Task
+        -HandleAssetUpdate(event) Task
+        -HandleAssetDelete(event) Task
+    }
+
+    class NotificationHandler {
+        +CanHandle(event) bool
+        +HandleAsync(event) Task
+        +GetHandlerType() HandlerType
+        -channels: Dictionary~Channel, INotificationChannel~
+    }
+
+    class DocumentHandler {
+        +CanHandle(event) bool
+        +HandleAsync(event) Task
+        +GetHandlerType() HandlerType
+        -votiroService: IVotiroService
+    }
+
+    class AssetEvent {
+        -eventId: Guid
+        -eventType: EventType
+        -eventDetails: JsonObject
+        -createdAt: DateTime
+        -createdBy: string
+        +GetEventType() EventType
+    }
+
+    class DispatchAudit {
+        -id: Guid
+        -eventId: Guid
+        -handlerType: HandlerType
+        -dispatchStatus: DispatchStatus
+        -handlerResult: string
+        -executionTime: TimeSpan
+        -dispatchedAt: DateTime
+        -completedAt: DateTime
+    }
+
+    EventDispatcher --> IEventHandler
+    IEventHandler <|-- AssetEventHandler
+    IEventHandler <|-- NotificationHandler
+    IEventHandler <|-- DocumentHandler
+    EventDispatcher --> AssetEvent
+    EventDispatcher --> DispatchAudit
+```
+
+---
+
+## 4. NotificationHandler Class Diagram
 
 ```mermaid
 classDiagram
@@ -190,17 +269,9 @@ classDiagram
         +LogSuccess(sentAt) void
         +LogFailure(error) void
         +IncrementRetry() void
-    }
+    }---
 
-    NotificationHandler --> INotificationChannel
-    INotificationChannel <|-- UINotificationChannel
-    INotificationChannel <|-- EmailNotificationChannel
-    NotificationHandler --> NotificationLog
-```
-
----
-
-## 4. DocumentHandler & Votiro Integration
+## 5. DocumentHandler & Votiro Integration
 
 ```mermaid
 classDiagram
