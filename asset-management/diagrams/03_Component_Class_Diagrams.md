@@ -1,359 +1,351 @@
-# Asset Master — Component & Class Diagrams
+# Asset Master — Sequence Diagrams
 
 > **Module:** Asset Master System | **Version:** 1.0
 
 ---
 
-## 1. Overall System Architecture
+## 1. Asset Creation Flow
 
 ```mermaid
-graph LR
-    subgraph "Asset Master System"
-        UI[Asset Master UI]
-        API[Asset API Layer]
+sequenceDiagram
+    actor User
+    participant UI as Asset Master UI
+    participant API as Asset API
+    participant AB as Asset Business Service
+    participant AES as AssetEventStore
+    participant ED as EventDispatcher
+    participant AEH as AssetEventHandler
+    participant AUDITDB as Audit Log DB
+    participant ASSETDB as Asset Master DB
 
-        subgraph "Core Services"
-            AES[AssetEventStore]
-            AB[AssetBusiness Service]
-            ED[EventDispatcher]
-        end
+    User->>UI: Create Asset
+    UI->>API: POST /assets
+    API->>AB: ValidateAndCreate(assetData)
+    AB->>ASSETDB: Save Asset
+    ASSETDB-->>AB: Asset Created
+    AB->>AES: EmitEvent(AssetCreated)
+    AES-->>API: Event Stored
+    API-->>UI: Asset Created Response
+    UI-->>User: Show Confirmation
 
-        subgraph "Handler Services"
-            AEH[AssetEventHandler]
-            NH[NotificationHandler]
-            DH[DocumentHandler]
-        end
+    AES->>ED: PublishEvent(AssetCreated)
+    ED->>AEH: CanHandle(event)?
+    AEH-->>ED: true
+    ED->>AEH: HandleAsync(event)
+    AEH->>AEH: HandleAssetCreate(event)
+    AEH->>AEH: GenerateAuditMessage()
+    AEH->>AUDITDB: LogAudit(assetCreated, details)
+    AUDITDB-->>AEH: Audit Logged
+    AEH->>ED: Complete
+```
 
-        subgraph "External Services"
-            VOTIRO[Votiro CDR API]
-            EMAIL[Email Service]
-        end
+---
 
-        subgraph "Databases"
-            ASSETDB[(Asset Master DB)]
-            AUDITDB[(Audit Log DB)]
-        end
+## 2. Asset Update with Event Dispatch
 
-        subgraph "Communication"
-            SIGNALR[SignalR Hub]
-            WEBHOOK[Event Bus]
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Asset Master UI
+    participant API as Asset API
+    participant AB as Asset Business Service
+    participant AES as AssetEventStore
+    participant ED as EventDispatcher
+    participant AEH as AssetEventHandler
+    participant NH as NotificationHandler
+    participant SIGNALR as SignalR Hub
+    participant ASSETDB as Asset Master DB
+    participant AUDITDB as Audit Log DB
+
+    User->>UI: Update Asset
+    UI->>API: PUT /assets/{id}
+    API->>AB: ValidateAndUpdate(assetData)
+    AB->>ASSETDB: Save Updated Asset
+    ASSETDB-->>AB: Asset Updated
+    AB->>AES: EmitEvent(AssetUpdated)
+    AES-->>API: Event Stored
+    API-->>UI: Asset Updated Response
+
+    AES->>ED: PublishEvent(AssetUpdated)
+    ED->>AEH: DispatchAsync(event)
+    AEH->>AEH: ExtractModifiedFields(before, after)
+    AEH->>AUDITDB: LogAudit(fieldChanges)
+    AUDITDB-->>AEH: Audit Logged
+    AEH->>ED: NotifyOnCompletion()
+    
+    ED->>NH: DispatchAsync(event)
+    NH->>NH: ResolveChannels(recipients)
+    NH->>SIGNALR: SendToUIAsync(notification)
+    SIGNALR-->>NH: Sent
+    NH->>AUDITDB: LogNotification()
+    AUDITDB-->>NH: Logged
+    
+    SIGNALR->>UI: Push Notification
+    UI-->>User: Display Update
+```
+
+---
+
+## 3. Document Upload & Scan Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Asset Master UI
+    participant API as Asset API
+    participant DH as DocumentHandler
+    participant VOTIRO as Votiro CDR API
+    participant ATTACHDB as Attachment DB
+    participant SCANDB as DocumentScan DB
+    participant WEBHOOK as Event Bus
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
+
+    User->>UI: Upload Document
+    UI->>API: POST /assets/{assetId}/attachments
+    API->>DH: UploadAndScanAsync(file, metadata)
+    
+    DH->>VOTIRO: SubmitFileAsync(file, metadata)
+    VOTIRO-->>DH: VotiroResponse {correlationId}
+    
+    DH->>ATTACHDB: CreateAttachment(fileName, status=Pending)
+    ATTACHDB-->>DH: Attachment Created
+    
+    DH->>SCANDB: CreateDocumentScan(correlationId, status=Submitted)
+    SCANDB-->>DH: DocumentScan Created
+    
+    DH-->>API: Submitted for Scan
+    API-->>UI: Return correlationId
+    UI-->>User: Scanning...
+```
+
+---
+
+## 4. Document Scan Result Polling & Completion
+
+```mermaid
+sequenceDiagram
+    participant DH as DocumentHandler
+    participant SCANDB as DocumentScan DB
+    participant VOTIRO as Votiro CDR API
+    participant ATTACHDB as Attachment DB
+    participant AUDITDB as Audit Log DB
+    participant WEBHOOK as Event Bus
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
+    participant SIGNALR as SignalR Hub
+    participant UI as Asset Master UI
+
+    loop Poll Every N Seconds
+        DH->>SCANDB: GetDocumentScan(correlationId)
+        SCANDB-->>DH: DocumentScan {status, pollingAttempts}
+        
+        alt Status Not Complete
+            DH->>VOTIRO: GetScanResultAsync(correlationId)
+            VOTIRO-->>DH: ScanResult
+            
+            alt Threat Detected
+                DH->>ATTACHDB: UpdateAttachment(status=ThreatDetected)
+                DH->>SCANDB: MarkThreatDetected(threatName)
+                DH->>AUDITDB: LogScan(threatDetected)
+            else Clean
+                DH->>ATTACHDB: UpdateAttachment(status=Clean)
+                DH->>SCANDB: MarkClean()
+                DH->>AUDITDB: LogScan(clean)
+            else Failed
+                DH->>SCANDB: MarkFailed(reason)
+                DH->>AUDITDB: LogScan(failed)
+            end
+            
+            DH->>WEBHOOK: PublishEvent(ScanCompleted)
+        else Max Retries Exceeded
+            DH->>SCANDB: MarkFailed(maxRetriesExceeded)
+            break Stop Polling
         end
     end
 
-    UI -->|Create / Update Asset| API
-    API -->|Validate & Persist| AB
-    AB -->|Emit Event| AES
+    WEBHOOK->>ED: DispatchEvent(ScanCompleted)
+    ED->>NH: DispatchAsync(event)
+    NH->>NH: ResolveChannels(assetOwner)
+    NH->>SIGNALR: SendToUIAsync(scanResult)
+    SIGNALR-->>UI: Push Result
+    NH->>AUDITDB: LogNotification()
+    UI-->>User: Display Scan Result
+```
 
-    AES -->|Retrieve Events| ED
-    ED -->|Dispatch to Handler| AEH
-    ED -->|Dispatch to Handler| NH
-    ED -->|Dispatch to Handler| DH
+---
+
+## 5. EventDispatcher Coordination Flow
+
+```mermaid
+sequenceDiagram
+    participant AES as AssetEventStore
+    participant ED as EventDispatcher
+    participant AEH as AssetEventHandler
+    participant NH as NotificationHandler
+    participant DH as DocumentHandler
+    participant AUDITDB as Audit Log DB
+
+    AES->>ED: PublishEvent(event)
+    ED->>ED: ResolveHandlers(event)
+    Note over ED: Check CanHandle() for each handler
+
+    par Parallel Handler Execution
+        ED->>AEH: ExecuteHandlerAsync(event)
+        AEH->>AEH: HandleAsync(event)
+        AEH->>AUDITDB: LogAudit()
+        AUDITDB-->>AEH: Done
+        AEH-->>ED: Success
+        ED->>AUDITDB: LogDispatchAudit(handler=AEH, status=Success)
+    and
+        ED->>NH: ExecuteHandlerAsync(event)
+        NH->>NH: HandleAsync(event)
+        NH->>AUDITDB: LogNotification()
+        AUDITDB-->>NH: Done
+        NH-->>ED: Success
+        ED->>AUDITDB: LogDispatchAudit(handler=NH, status=Success)
+    and
+        ED->>DH: ExecuteHandlerAsync(event)
+        DH->>DH: HandleAsync(event)
+        DH->>AUDITDB: LogScan()
+        AUDITDB-->>DH: Done
+        DH-->>ED: Success
+        ED->>AUDITDB: LogDispatchAudit(handler=DH, status=Success)
+    end
+
+    ED-->>AES: Dispatch Complete
+    Note over AUDITDB: All dispatch activities logged
+```
+
+---
+
+## 6. Notification Dispatch to Multiple Channels
+
+```mermaid
+sequenceDiagram
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
+    participant CHANNELS as INotificationChannel
+    participant SIGNALR as UINotificationChannel
+    participant EMAIL as EmailNotificationChannel
+    participant NOTIFDB as NotificationLog DB
+    participant SIGNALRHUB as SignalR Hub
+    participant EMAILSVC as Email Service
+
+    ED->>NH: HandleAsync(event)
+    NH->>NH: ResolveChannels(recipients)
+    Note over NH: Determine notification channels<br/>(UI, Email)
+
+    par Send to All Channels
+        NH->>SIGNALR: SendAsync(message, recipient)
+        SIGNALR->>SIGNALRHUB: SendAsync(connectionId, message)
+        SIGNALRHUB-->>SIGNALR: Sent
+        SIGNALR->>NOTIFDB: LogSuccess(Channel=UI)
+        NOTIFDB-->>SIGNALR: Logged
+        SIGNALR-->>NH: true
+    and
+        NH->>EMAIL: SendAsync(message, recipient)
+        EMAIL->>EMAILSVC: SendEmailAsync(template, recipient)
+        EMAILSVC-->>EMAIL: Sent
+        EMAIL->>NOTIFDB: LogSuccess(Channel=Email)
+        NOTIFDB-->>EMAIL: Logged
+        EMAIL-->>NH: true
+    end
+
+    NH-->>ED: Dispatch Complete
+```
+
+---
+
+## 7. Asset Deletion with Cascading Events
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Asset Master UI
+    participant API as Asset API
+    participant AB as Asset Business Service
+    participant AES as AssetEventStore
+    participant ED as EventDispatcher
+    participant AEH as AssetEventHandler
+    participant NH as NotificationHandler
+    participant ASSETDB as Asset Master DB
+    participant AUDITDB as Audit Log DB
+
+    User->>UI: Delete Asset
+    UI->>API: DELETE /assets/{id}
+    API->>AB: ValidateAndDelete(assetId)
+    AB->>ASSETDB: Delete Asset (Soft Delete)
+    ASSETDB-->>AB: Asset Deleted
+    AB->>AES: EmitEvent(AssetDeleted)
+    AES-->>API: Event Stored
+    API-->>UI: Asset Deleted
+
+    AES->>ED: PublishEvent(AssetDeleted)
     
-    AEH -->|Log Audit| AUDITDB
-    AEH -->|Notify via| NH
+    par Handler Execution
+        ED->>AEH: DispatchAsync(event)
+        AEH->>AEH: HandleAssetDelete(event)
+        AEH->>AUDITDB: LogAudit(assetDeleted)
+        AUDITDB-->>AEH: Logged
+        AEH-->>ED: Complete
+    and
+        ED->>NH: DispatchAsync(event)
+        NH->>NH: ResolveChannels(admins, assetOwner)
+        NH->>AUDITDB: LogNotification()
+        AUDITDB-->>NH: Logged
+        NH-->>ED: Complete
+    end
 
-    NH -->|Push| SIGNALR
-    NH -->|Send| EMAIL
-    NH -->|Log| AUDITDB
-    SIGNALR -->|Display| UI
-
-    UI -->|Upload File| API
-    API -->|Upload & Scan| DH
-    DH -->|Direct Upload + Get CorrelationId| VOTIRO
-    DH -->|Poll for Result| VOTIRO
-    DH -->|Webhook Callback| WEBHOOK
-    WEBHOOK -->|Dispatch| ED
-    DH -->|Log Scan| AUDITDB
-    DH -->|Notify via| NH
-
-    AB -->|Query| ASSETDB
-    AUDITDB -->|Store Logs| ASSETDB
-
-    style ED fill:#c8e6c9
-    style AEH fill:#e1f5ff
-    style NH fill:#f3e5f5
-    style DH fill:#fff3e0
-    style API fill:#e8f5e9
-    style SIGNALR fill:#fce4ec
-    style VOTIRO fill:#ffe0b2
+    UI-->>User: Asset Removed
 ```
 
 ---
 
-## 2. Handler Base Architecture
+## 8. Error Handling in Document Scan
 
 ```mermaid
-classDiagram
-    class BaseHandler {
-        <<abstract>>
-        -eventBus: IEventBus
-        -logger: ILogger
-        -auditRepository: IAuditRepository
-        #HandleAsync(event) Task
-        #LogAudit(handlerName, message, detail) Task
-        #PublishEvent(event) Task
-        #NotifyOnCompletion(notification) Task
-    }
+sequenceDiagram
+    participant DH as DocumentHandler
+    participant VOTIRO as Votiro CDR API
+    participant SCANDB as DocumentScan DB
+    participant AUDITDB as Audit Log DB
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
 
-    class AssetEventHandler {
-        -notificationHandler: INotificationHandler
-        +HandleAsync(event) Task
-        -HandleAssetCreate(event) Task
-        -HandleAssetUpdate(event) Task
-        -HandleAssetDelete(event) Task
-        -ExtractModifiedFields(before, after) List~string~
-    }
+    DH->>VOTIRO: SubmitFileAsync(file)
+    
+    alt Votiro Service Available
+        VOTIRO-->>DH: {correlationId}
+        DH->>SCANDB: CreateDocumentScan(correlationId)
+    else Votiro Service Error
+        VOTIRO-->>DH: Error
+        DH->>SCANDB: CreateDocumentScan(status=Failed)
+        DH->>AUDITDB: LogScan(error=VotiroServiceError)
+        DH->>ED: PublishEvent(ScanFailed)
+        ED->>NH: DispatchAsync(event)
+        NH->>NH: NotifyError(assetOwner, errorMsg)
+        NH-->>DH: Notified
+    end
 
-    class NotificationHandler {
-        -channels: Dictionary~Channel, INotificationChannel~
-        -notificationLogRepository: IRepository
-        +HandleAsync(request) Task
-        -ResolveChannels(recipients) List~Channel~
-        -DispatchToChannels(msg, recipients) Task
-    }
-
-    class DocumentHandler {
-        -votiroService: IVotiroService
-        -attachmentRepository: IRepository
-        -documentScanRepository: IRepository
-        +HandleAsync(file, metadata) Task
-        -SubmitForScanAsync(file) Task~string~
-        -PollScanResultAsync(correlationId) Task
-        -HandleScanCompletion(result) Task
-    }
-
-    BaseHandler <|-- AssetEventHandler
-    BaseHandler <|-- NotificationHandler
-    BaseHandler <|-- DocumentHandler
-
-    class AssetEvent {
-        -eventId: Guid
-        -eventType: EventType
-        -eventDetails: JsonObject
-        -createdAt: DateTime
-        -createdBy: string
-    }
-
-    class AuditRecord {
-        -auditId: Guid
-        -handlerName: string
-        -referenceId: Guid
-        -auditMessage: string
-        -detail: JsonObject
-        -status: AuditStatus
-        -createdAt: DateTime
-    }    AssetEventHandler --> AssetEvent
-    AssetEventHandler --> AuditRecord
-    NotificationHandler --> AuditRecord
-    DocumentHandler --> AuditRecord
-```
-
----
-
-## 3. EventDispatcher & Handler Coordination
-
-```mermaid
-classDiagram
-    class IEventHandler {
-        <<interface>>
-        +CanHandle(event) bool
-        +HandleAsync(event) Task
-        +GetHandlerType() HandlerType
-    }
-
-    class EventDispatcher {
-        -handlers: List~IEventHandler~
-        -logger: ILogger
-        -auditRepository: IAuditRepository
-        +RegisterHandler(handler) void
-        +DispatchAsync(event) Task
-        -ResolveHandlers(event) List~IEventHandler~
-        -ExecuteHandlerAsync(handler, event) Task
-        -LogDispatchAudit(event, handler, result) Task
-    }
-
-    class AssetEventHandler {
-        +CanHandle(event) bool
-        +HandleAsync(event) Task
-        +GetHandlerType() HandlerType
-        -HandleAssetCreate(event) Task
-        -HandleAssetUpdate(event) Task
-        -HandleAssetDelete(event) Task
-    }
-
-    class NotificationHandler {
-        +CanHandle(event) bool
-        +HandleAsync(event) Task
-        +GetHandlerType() HandlerType
-        -channels: Dictionary~Channel, INotificationChannel~
-    }
-
-    class DocumentHandler {
-        +CanHandle(event) bool
-        +HandleAsync(event) Task
-        +GetHandlerType() HandlerType
-        -votiroService: IVotiroService
-    }
-
-    class AssetEvent {
-        -eventId: Guid
-        -eventType: EventType
-        -eventDetails: JsonObject
-        -createdAt: DateTime
-        -createdBy: string
-        +GetEventType() EventType
-    }
-
-    class DispatchAudit {
-        -id: Guid
-        -eventId: Guid
-        -handlerType: HandlerType
-        -dispatchStatus: DispatchStatus
-        -handlerResult: string
-        -executionTime: TimeSpan
-        -dispatchedAt: DateTime
-        -completedAt: DateTime
-    }
-
-    EventDispatcher --> IEventHandler
-    IEventHandler <|-- AssetEventHandler
-    IEventHandler <|-- NotificationHandler
-    IEventHandler <|-- DocumentHandler
-    EventDispatcher --> AssetEvent
-    EventDispatcher --> DispatchAudit
-```
-
----
-
-## 4. NotificationHandler Class Diagram
-
-```mermaid
-classDiagram
-    class NotificationHandler {
-        -channels: Dictionary~Channel, INotificationChannel~
-        -notificationLogRepository: IRepository
-        +HandleAsync(request) Task
-        -ResolveChannels(recipients) List~Channel~
-        -SendToUIAsync(msg, recipient) Task
-        -SendEmailAsync(msg, recipient) Task
-    }
-
-    class INotificationChannel {
-        <<interface>>
-        +SendAsync(message, recipient) Task~bool~
-        +GetChannelType() Channel
-    }
-
-    class UINotificationChannel {
-        -signalRHub: IHubContext
-        +SendAsync(message, recipient) Task~bool~
-        +GetChannelType() Channel
-    }
-
-    class EmailNotificationChannel {
-        -emailService: IEmailService
-        -templateEngine: ITemplateEngine
-        +SendAsync(message, recipient) Task~bool~
-        +GetChannelType() Channel
-    }
-
-    class NotificationLog {
-        -id: Guid
-        -notificationId: Guid
-        -channel: Channel
-        -recipient: string
-        -status: NotificationStatus
-        -retryCount: int
-        -errorMessage: string
-        -sentAt: DateTime
-        +LogSuccess(sentAt) void
-        +LogFailure(error) void
-        +IncrementRetry() void
-    }---
-
-## 5. DocumentHandler & Votiro Integration
-
-```mermaid
-classDiagram
-    class DocumentHandler {
-        -votiroService: IVotiroService
-        -attachmentRepository: IRepository
-        -documentScanRepository: IRepository
-        -notificationHandler: INotificationHandler
-        +UploadAndScanAsync(file, metadata) Task~Attachment~
-        -SubmitForScanAsync(file, metadata) Task~string~
-        -PollScanStatusAsync(correlationId) Task~ScanResult~
-        -HandleScanCompletion(result) Task
-        -NotifyScanResult(attachment, result) Task
-    }
-
-    class IVotiroService {
-        <<interface>>
-        +SubmitFileAsync(file, metadata) Task~VotiroResponse~
-        +GetScanResultAsync(correlationId) Task~ScanResult~
-    }
-
-    class VotiroService {
-        <<implements IVotiroService>>
-        -apiClient: HttpClient
-        -apiKey: string
-        -baseUrl: string
-        +SubmitFileAsync(file, metadata) Task~VotiroResponse~
-        +GetScanResultAsync(correlationId) Task~ScanResult~
-        -BuildAuthHeaders() Dictionary~string, string~
-    }
-
-    class VotiroResponse {
-        -correlationId: string
-        -status: string
-        -message: string
-        -timestamp: DateTime
-    }
-
-    class ScanResult {
-        -correlationId: string
-        -status: ScanStatus
-        -threatDetected: bool
-        -threatName: string
-        -scanDuration: TimeSpan
-        -processedAt: DateTime
-    }
-
-    class Attachment {
-        -id: Guid
-        -fileName: string
-        -mimeType: string
-        -fileSize: long
-        -correlationId: string
-        -scanStatus: ScanStatus
-        -scanResult: string
-        -assetId: Guid
-        +UpdateScanStatus(status) void
-        +SetCorrelationId(id) void
-        +MarkScanned(result) void
-    }
-
-    class DocumentScan {
-        -id: Guid
-        -attachmentId: Guid
-        -correlationId: string
-        -scanStatus: ScanStatus
-        -scanResultDetail: string
-        -threatDetected: bool
-        -threatName: string
-        -pollingAttempts: int
-        -lastPolledAt: DateTime
-        +MarkClean() void
-        +MarkThreatDetected(threat) void
-        +MarkFailed(reason) void
-        +IncrementPollingAttempt() void
-    }
-
-    DocumentHandler --> IVotiroService
-    DocumentHandler --> Attachment
-    DocumentHandler --> DocumentScan
-    DocumentHandler --> VotiroResponse
-    IVotiroService --> VotiroResponse
-    IVotiroService --> ScanResult
-    DocumentScan --> ScanResult
+    loop Polling
+        DH->>VOTIRO: GetScanResultAsync(correlationId)
+        
+        alt Polling Successful
+            VOTIRO-->>DH: ScanResult
+            DH->>SCANDB: UpdateStatus(result)
+        else Polling Failed - Retry
+            VOTIRO-->>DH: Error
+            DH->>SCANDB: IncrementPollingAttempt()
+            
+            alt Max Retries Not Exceeded
+                Note over DH: Continue polling in next cycle
+            else Max Retries Exceeded
+                DH->>SCANDB: MarkFailed(maxRetriesExceeded)
+                DH->>AUDITDB: LogScan(failed)
+                DH->>ED: PublishEvent(ScanFailed)
+                break Stop Polling
+            end
+        end
+    end
 ```
