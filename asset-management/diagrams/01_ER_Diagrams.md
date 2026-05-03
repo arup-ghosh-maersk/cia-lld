@@ -4,7 +4,7 @@
 
 ---
 
-## 1. Complete ER Diagram
+## 1. Complete ER Diagram with Full Models
 
 ```mermaid
 erDiagram
@@ -30,6 +30,298 @@ erDiagram
     TEMPLATE_ATTACHMENT ||--o{ MASTER_ATTACHMENT : "sourced_from"
     ASSET_EVENT_STORE ||--o{ ASSET_AUDIT : "produces"
     ASSET_AUDIT ||--o{ NOTIFICATION_LOG : "dispatched_as"
+
+    ASSET_TEMPLATE {
+        uuid id PK
+        uuid parent_template_id FK "null for root"
+        string template_code UK
+        string template_name
+        string description
+        string category
+        string functional_type
+        string hierarchy_path
+        int hierarchy_level
+        string status
+        jsonb metadata
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    ASSET_MASTER {
+        uuid id PK
+        uuid asset_template_id FK
+        uuid parent_asset_id FK "null for root"
+        string asset_code UK
+        string asset_name
+        string asset_type
+        string description
+        string serial_number
+        string manufacturer
+        string model
+        string location
+        string department
+        string owner_user_id
+        string status
+        date installation_date
+        date commissioning_date
+        date warranty_end_date
+        date lifecycle_start_date
+        date lifecycle_end_date
+        decimal acquisition_cost
+        string acquisition_currency
+        decimal current_value
+        string asset_class
+        string sub_class
+        string criticality_level
+        boolean is_active
+        jsonb metadata
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    ATTRIBUTE_DEF {
+        uuid id PK
+        string attribute_key UK
+        string display_name
+        string description
+        string data_type "string, number, date, boolean, json, currency"
+        string category
+        string default_value
+        jsonb valid_values
+        string unit_of_measure
+        string group_name
+        int sort_order
+        boolean is_required
+        boolean is_searchable
+        boolean is_filterable
+        boolean is_editable
+        jsonb validation_rules
+        int max_length
+        string regex_pattern
+        boolean is_system
+        string notes
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    TEMPLATE_ATTRIBUTE {
+        uuid id PK
+        uuid asset_template_id FK
+        uuid attribute_def_id FK
+        boolean is_mandatory
+        boolean is_inherited
+        int sort_order
+        string display_label
+        string help_text
+        jsonb default_value_override
+        string notes
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    MASTER_ATTRIBUTE {
+        uuid id PK
+        uuid asset_master_id FK
+        uuid attribute_def_id FK
+        uuid template_attribute_id FK
+        string source "manual, template, system, imported"
+        string value_string
+        decimal value_number
+        date value_date
+        boolean value_boolean
+        jsonb value_json
+        string validation_status "valid, invalid, warning"
+        jsonb validation_errors
+        boolean is_overridden
+        string override_reason
+        uuid overridden_by
+        timestamp overridden_at
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    COMPONENT {
+        uuid id PK
+        string component_code UK
+        string component_name
+        string description
+        string category
+        string manufacturer
+        string model
+        jsonb specifications
+        string status
+        boolean is_active
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    TEMPLATE_COMPONENT {
+        uuid id PK
+        uuid asset_template_id FK
+        uuid component_id FK
+        int quantity
+        boolean is_mandatory
+        boolean is_inheritable
+        int sort_order
+        jsonb configuration
+        string notes
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    MASTER_COMPONENT {
+        uuid id PK
+        uuid asset_master_id FK
+        uuid component_id FK
+        uuid template_component_id FK
+        string source "template, manual, system"
+        string status "active, inactive, replaced"
+        int quantity_installed
+        date installation_date
+        date removal_date
+        string serial_number
+        jsonb configuration_applied
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    ATTACHMENT {
+        uuid id PK
+        string file_name UK "per upload context"
+        string file_path
+        string mime_type
+        string category "document, manual, certification, warranty, other"
+        bigint file_size
+        string file_hash
+        string scan_status "pending, clean, threat_detected, failed, quarantined"
+        string threat_name
+        string storage_location
+        boolean is_active
+        uuid uploaded_by
+        timestamp uploaded_at
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    TEMPLATE_ATTACHMENT {
+        uuid id PK
+        uuid asset_template_id FK
+        uuid attachment_id FK
+        boolean is_mandatory
+        string attachment_type
+        int sort_order
+        string notes
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    MASTER_ATTACHMENT {
+        uuid id PK
+        uuid asset_master_id FK
+        uuid attachment_id FK
+        uuid template_attachment_id FK
+        string source "template, manual, system"
+        string status "active, archived, replaced"
+        boolean is_visible
+        string access_level "public, internal, restricted"
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    DOCUMENT_SCAN {
+        uuid id PK
+        uuid attachment_id FK
+        string correlation_id UK
+        string scan_engine "votiro, kaspersky, other"
+        string scan_status "submitted, in_progress, completed, threat_detected, failed, timeout"
+        string threat_name
+        string threat_level "low, medium, high, critical"
+        string scan_result_detail
+        string sanitized_file_path
+        int polling_attempts
+        int max_polling_attempts
+        timestamp scan_start_time
+        timestamp scan_end_time
+        timestamp next_poll_time
+        string failure_reason
+        jsonb scan_metadata
+        uuid created_by
+        timestamp created_at
+        uuid updated_by
+        timestamp updated_at
+    }
+
+    ASSET_EVENT_STORE {
+        uuid event_id PK
+        string event_type "AssetCreated, AssetUpdated, AssetDeleted, AttachmentUploaded, DocumentScanStarted, DocumentScanCompleted"
+        string correlation_id UK
+        uuid source_entity_id
+        string source_entity_type
+        jsonb event_details
+        jsonb metadata
+        string status "stored, processed, failed"
+        uuid created_by
+        timestamp created_at
+    }
+
+    ASSET_AUDIT {
+        uuid audit_id PK
+        uuid event_id FK
+        string entity_type
+        uuid entity_id
+        string action "CREATE, UPDATE, DELETE, SCAN, NOTIFY"
+        string old_values
+        string new_values
+        string change_summary
+        string user_id
+        string ip_address
+        string user_agent
+        jsonb details
+        string status "SUCCESS, FAILURE"
+        string error_message
+        uuid created_by
+        timestamp created_at
+    }
+
+    NOTIFICATION_LOG {
+        uuid notification_id PK
+        uuid audit_id FK
+        uuid event_id FK
+        string notification_type "ui_push, email, sms, webhook"
+        string recipient "user_id, email, phone"
+        string status "pending, sent, delivered, failed, bounced"
+        int retry_count
+        int max_retries
+        string error_message
+        jsonb notification_payload
+        timestamp sent_at
+        timestamp delivered_at
+        string delivery_reference
+        uuid created_by
+        timestamp created_at
+    }
 ```
 
 ---
