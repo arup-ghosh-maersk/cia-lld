@@ -189,53 +189,54 @@ sequenceDiagram
     participant DH as DocumentHandler
     participant VOTIRO as Votiro CDR API
     participant DB as Database
-    participant WEBHOOK as Event Bus
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
 
     User->>UI: Upload file (e.g. Manual.pdf)
-    UI->>API: POST /api/v1/assets/{assetId}/attachments {file, metadata}
+    UI->>API: POST /api/v1/assets/{assetId}/attachments
     API->>DH: UploadAndScanAsync(file, metadata)
 
-    Note over DH,VOTIRO: Direct Upload to Votiro
     DH->>VOTIRO: SubmitFileAsync(file, metadata)
-    VOTIRO-->>DH: VotiroResponse {correlationId, status=PENDING}
-
+    VOTIRO-->>DH: VotiroResponse {correlationId}
+    
     DH->>DB: CreateAttachment {fileName, correlationId, status=Pending}
     DB-->>DH: Attachment Created
     DH->>DB: CreateDocumentScan {correlationId, status=Submitted}
     DB-->>DH: DocumentScan Created
 
     DH-->>API: Submitted for Scan
-    API-->>UI: 202 Accepted {attachmentId, correlationId, status=Pending}
+    API-->>UI: 202 Accepted {attachmentId, correlationId}
     UI-->>User: ⏳ "File submitted for scanning..."
 
-    Note over DH,DB: Async Polling Mechanism
-    par Polling Loop
-        loop Every N Seconds
-            DH->>DB: GetDocumentScan(correlationId)
-            DB-->>DH: DocumentScan {status, pollingAttempts}
-            alt Status Not Complete
-                DH->>VOTIRO: GetScanResultAsync(correlationId)
-                VOTIRO-->>DH: ScanResult {status, threat, processedAt}
-                
-                alt THREAT_DETECTED
-                    DH->>DB: UpdateAttachment {status=ThreatDetected}
-                    DH->>DB: UpdateDocumentScan {status=ThreatDetected, threatName}
-                else CLEAN
-                    DH->>DB: UpdateAttachment {status=Clean}
-                    DH->>DB: UpdateDocumentScan {status=Clean}
-                else FAILED
-                    DH->>DB: UpdateDocumentScan {status=Failed, reason}
-                end
-                
-                DH->>WEBHOOK: PublishEvent(ScanCompleted)
-            else Max Retries Exceeded
-                DH->>DB: MarkFailed(maxRetriesExceeded)
-                break Stop Polling
+    Note over DH,NH: Async Polling & Notification
+    loop Poll Every N Seconds
+        DH->>DB: GetDocumentScan(correlationId)
+        DB-->>DH: DocumentScan {status, pollingAttempts}
+        
+        alt Status Not Complete
+            DH->>VOTIRO: GetScanResultAsync(correlationId)
+            VOTIRO-->>DH: ScanResult {status, threat}
+            
+            alt Threat Detected
+                DH->>DB: UpdateAttachment {status=ThreatDetected}
+                DH->>DB: UpdateDocumentScan {status=ThreatDetected, threatName}
+            else Clean
+                DH->>DB: UpdateAttachment {status=Clean}
+                DH->>DB: UpdateDocumentScan {status=Clean}
+            else Failed
+                DH->>DB: UpdateDocumentScan {status=Failed}
             end
+            
+            break
+        else Max Retries Exceeded
+            DH->>DB: MarkFailed(maxRetriesExceeded)
+            break
         end
     end
 
-    WEBHOOK->>API: Callback with ScanResult
-    API-->>UI: Push Notification
+    DH->>ED: PublishEvent(ScanCompleted)
+    ED->>NH: DispatchAsync(event)
+    NH->>NH: ResolveChannels(assetOwner)
+    NH-->>UI: Push Notification
     UI-->>User: ✅/❌ "Manual.pdf scan complete"
 ```
