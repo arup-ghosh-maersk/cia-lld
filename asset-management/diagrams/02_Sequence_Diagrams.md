@@ -196,3 +196,54 @@ sequenceDiagram
     API-->>UI: 202 Accepted
     UI-->>User: File submitted for scanning
 ```
+
+### 5b. Background Polling
+
+```mermaid
+sequenceDiagram
+    participant DH as DocumentHandler
+    participant DB as Database
+    participant VOTIRO as Votiro CDR API
+    participant ES as EventStore
+
+    Note over DH,DB: Background polling job
+
+    loop Poll every N seconds max 30 attempts
+        DH->>DB: GetDocumentScan(correlationId)
+        DB-->>DH: status
+
+        Note over DH: If status is COMPLETED
+        DH->>VOTIRO: GetScanResult(correlationId)
+        VOTIRO-->>DH: ScanResult
+
+        Note over DH,DB: Determine final status Clean or ThreatDetected
+        DH->>DB: UpdateAttachment(finalStatus)
+        DH->>DB: UpdateDocumentScan(finalStatus)
+
+        DH->>ES: Emit DocumentScanCompleted
+        break Stop polling
+            DH-->>DB: Polling complete
+        end
+    end
+```
+
+### 5c. Scan Completion Notification
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant ES as EventStore
+    participant ED as EventDispatcher
+    participant NH as NotificationHandler
+    participant Audit as AuditStore
+    participant UI as Asset Master UI
+
+    ES->>ED: Publish DocumentScanCompleted
+    ED->>NH: ExecuteHandlerAsync
+
+    NH->>Audit: Log notification event
+    Audit-->>NH: Logged
+
+    NH->>UI: SignalR scan completed
+    UI-->>User: Display scan result
+```
