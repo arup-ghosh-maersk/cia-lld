@@ -336,102 +336,44 @@ COMMIT;
 
 ---
 
-## Code Examples
+## Attribute Examples
 
-### C# — Retrieve Asset Attributes
-```csharp
-public class AttributeService
-{
-    public async Task<List<AttributeDto>> GetAssetAttributesAsync(Guid assetId)
-    {
-        var sql = @"
-            SELECT ad.*, ma.attribute_value, ma.is_inherited
-            FROM ATTRIBUTE_DEF ad
-            JOIN TEMPLATE_ATTRIBUTE ta ON ad.id = ta.attribute_def_id
-            JOIN ASSET_MASTER am ON am.asset_template_id = ta.asset_template_id
-            LEFT JOIN MASTER_ATTRIBUTE ma ON ad.id = ma.attribute_def_id 
-              AND am.id = ma.asset_master_id
-            WHERE am.id = @AssetId
-            ORDER BY ad.group_name, ad.sort_order";
-
-        using var connection = new NpgsqlConnection(_connectionString);
-        var attributes = await connection.QueryAsync<AttributeDto>(sql, 
-            new { AssetId = assetId });
-        
-        return attributes.ToList();
-    }
-}
-
-public class AttributeDto
-{
-    public Guid Id { get; set; }
-    public string DisplayName { get; set; }
-    public string DataType { get; set; }
-    public string AttributeValue { get; set; }
-    public bool IsInherited { get; set; }
-    public string Unit { get; set; }
-    public List<ValidationRule> ValidationRules { get; set; }
-}
+### Example 1: Motor Speed Attribute
+```
+Key: motor_speed_rpm
+Display Name: Motor Speed (RPM)
+Data Type: NUMBER
+Unit: RPM
+Group: Motor Specifications
+Required: YES
+Default: 1500
+Range: 100–10,000 RPM
+Rules: MIN_VALUE(100), MAX_VALUE(10000)
 ```
 
-### C# — Validate Attribute Value
-```csharp
-public class AttributeValidator
-{
-    public async Task<ValidationResult> ValidateAttributeAsync(
-        Guid attributeDefId, string value)
-    {
-        var attrDef = await _repo.GetAttributeDefAsync(attributeDefId);
-        if (attrDef == null)
-            return ValidationResult.Failure("Attribute not found");
-
-        var errors = new List<string>();
-        var warnings = new List<string>();
-
-        foreach (var rule in attrDef.ValidationRules.OrderBy(r => r.EvaluationOrder))
-        {
-            var result = rule.RuleType switch
-            {
-                "REQUIRED" => ValidateRequired(value, rule),
-                "MIN_VALUE" => ValidateMinValue(value, rule),
-                "MAX_VALUE" => ValidateMaxValue(value, rule),
-                "MIN_LENGTH" => ValidateMinLength(value, rule),
-                "MAX_LENGTH" => ValidateMaxLength(value, rule),
-                "REGEX" => ValidateRegex(value, rule),
-                "ENUM" => ValidateEnum(value, rule),
-                "DATE_RANGE" => ValidateDateRange(value, rule),
-                _ => ValidationRuleResult.Success()
-            };
-
-            if (!result.IsValid)
-            {
-                if (rule.Severity == "ERROR")
-                    errors.Add(result.ErrorMessage);
-                else
-                    warnings.Add(result.ErrorMessage);
-            }
-        }
-
-        return errors.Any() 
-            ? ValidationResult.Failure(errors) 
-            : new ValidationResult(warnings);
-    }
-}
+### Example 2: Priority Level
+```
+Key: priority
+Display Name: Priority
+Data Type: ENUM
+Values: LOW, MEDIUM, HIGH, CRITICAL
+Required: YES
+Rules: ENUM validation
 ```
 
-### Query: Attributes by Group
+### Query Examples
 ```sql
-SELECT 
-  group_name,
-  attribute_key,
-  display_name,
-  data_type,
-  unit,
-  is_required,
-  COUNT(*) OVER (PARTITION BY group_name) as group_size
-FROM ATTRIBUTE_DEF
-WHERE is_active = true
-ORDER BY group_name, sort_order;
+-- Get all attributes for asset template
+SELECT * FROM ATTRIBUTE_DEF ad
+JOIN TEMPLATE_ATTRIBUTE ta ON ad.id = ta.attribute_def_id
+WHERE ta.asset_template_id = $1
+ORDER BY ad.group_name, ad.sort_order;
+
+-- Get asset attribute values
+SELECT ad.display_name, ma.attribute_value, ad.unit
+FROM MASTER_ATTRIBUTE ma
+JOIN ATTRIBUTE_DEF ad ON ma.attribute_def_id = ad.id
+WHERE ma.asset_master_id = $1;
 ```
 
 ---
