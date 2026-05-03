@@ -202,39 +202,35 @@ sequenceDiagram
     DH->>DB: CreateAttachment {fileName, correlationId, status=Pending}
     DB-->>DH: Attachment Created
     DH->>DB: CreateDocumentScan {correlationId, status=Submitted}
-    DB-->>DH: DocumentScan Created    DH-->>API: Submitted for Scan
+    DB-->>DH: DocumentScan Created
+
+    DH-->>API: Submitted for Scan
     API-->>UI: 202 Accepted {attachmentId, correlationId}
     UI-->>User: ⏳ "File submitted for scanning..."
 
-    Note over DH,NH: Async Polling & Notification
+    Note over DH,DB: Async Polling & Processing
     loop Poll Every N Seconds
         DH->>DB: GetDocumentScan(correlationId)
         DB-->>DH: DocumentScan {status, pollingAttempts}
         
-        alt Scan Complete
+        opt Scan Complete
             DH->>VOTIRO: GetScanResultAsync(correlationId)
             VOTIRO-->>DH: ScanResult {status, threat}
             
             alt Threat Detected
                 DH->>DB: UpdateAttachment {status=ThreatDetected}
-                DH->>DB: UpdateDocumentScan {status=ThreatDetected, threatName}
+                DH->>DB: UpdateDocumentScan {status=ThreatDetected}
             else Clean
                 DH->>DB: UpdateAttachment {status=Clean}
                 DH->>DB: UpdateDocumentScan {status=Clean}
             else Failed
                 DH->>DB: UpdateDocumentScan {status=Failed}
             end
-            
-            break
-        else Max Retries Exceeded
-            DH->>DB: MarkFailed(maxRetriesExceeded)
-            break
         end
     end
 
     DH->>ED: PublishEvent(ScanCompleted)
     ED->>NH: DispatchAsync(event)
-    NH->>NH: ResolveChannels(assetOwner)
-    NH-->>UI: Push Notification
+    NH->>UI: SendNotification(scanResult)
     UI-->>User: ✅/❌ "Manual.pdf scan complete"
 ```
