@@ -180,9 +180,11 @@ sequenceDiagram
     participant UI as Asset Master UI
     participant API as Asset API
     participant DH as DocumentHandler
+    participant ES as EventStore
     participant VOTIRO as Votiro CDR API
     participant DB as Database
     participant ED as EventDispatcher
+    participant NH as NotificationHandler
     participant Audit as AuditStore
 
     User->>UI: Upload file (e.g. Manual.pdf)
@@ -197,12 +199,21 @@ sequenceDiagram
     DH->>DB: CreateDocumentScan {correlationId, status=Submitted}
     DB-->>DH: DocumentScan Created
 
+    Note over DH,ES: Emit Document Scan Event
+    DH->>ES: EmitEvent(DocumentScanStarted, correlationId)
+    ES-->>API: Event Stored, EventId
+    
     DH-->>API: Submitted for Scan
     API-->>UI: 202 Accepted {attachmentId, correlationId}
     UI-->>User: ⏳ "File submitted for scanning..."
 
+    Note over ES,ED: EventDispatcher triggers DocumentHandler polling
+    ES->>ED: PublishEvent(DocumentScanStarted, correlationId)
+    ED->>ED: ResolveHandlers(DocumentScanStarted)
+    ED->>DH: ExecuteHandlerAsync(DocumentScanStarted)
+
     Note over DH,DB: Async Polling & Processing
-    loop Poll Every N Seconds
+    loop Poll Every N Seconds (Max 30)
         DH->>DB: GetDocumentScan(correlationId)
         DB-->>DH: DocumentScan {status, pollingAttempts}
         
@@ -219,17 +230,24 @@ sequenceDiagram
             else Failed
                 DH->>DB: UpdateDocumentScan {status=Failed}
             end
+            break Exit Loop
         end
     end
 
+    Note over DH,ES: Emit Scan Completion Event
+    DH->>ES: EmitEvent(DocumentScanCompleted, result)
+    ES-->>DH: Event Stored
+    
     DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
     Audit-->>DH: Logged
 
-    Note over DH,ED: Publish Completion Event
-    DH->>ED: PublishEvent(ScanCompleted, correlationId)
-    ED->>ED: ResolveHandlers(ScanCompleted)
-    ED->>Audit: LogAudit(handler="NotificationHandler", scan_result)
-    Audit-->>ED: Logged
-    ED->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
+    Note over ES,NH: EventDispatcher routes to NotificationHandler
+    ES->>ED: PublishEvent(DocumentScanCompleted)
+    ED->>ED: ResolveHandlers(DocumentScanCompleted)
+    ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
+    
+    NH->>Audit: LogNotification(handler="NotificationHandler", result)
+    Audit-->>NH: Logged
+    NH->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
     UI-->>User: Display result
 ```

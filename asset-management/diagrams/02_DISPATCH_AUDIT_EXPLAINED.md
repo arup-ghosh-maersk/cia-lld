@@ -279,39 +279,109 @@ No separate table to join!
 
 ---
 
-## Example #4: Document Upload & Scan
+## Example #4: Document Upload & Scan (Event-Driven)
 
-**Scenario:** User uploads file, DocumentHandler polls Votiro, returns result
+**Scenario:** User uploads file → DocumentHandler emits events → EventDispatcher polls Votiro → NotificationHandler notifies
 
-### Document Tracking in ASSET_AUDIT
+### Event-Driven Flow
 
-**Initial upload event:**
+**1. DocumentScanStarted Event (emitted by DocumentHandler):**
+```json
+{
+  "event_id": "e-scan-start-789",
+  "event_type": "DocumentScanStarted",
+  "asset_master_id": "asset-001",
+  "attachment_id": "att-001",
+  "file_name": "Manual.pdf",
+  "correlation_id": "votiro-corr-xyz789",
+  "created_at": "2026-05-03 13:00:00.050"
+}
+```
+
+**2. DocumentHandler logs to ASSET_AUDIT:**
 ```json
 {
   "id": "audit-401",
   "asset_master_id": "asset-001",
-  "event_id": "e345",
+  "event_id": "e-scan-start-789",
   "handler": "DocumentHandler",
   "change_type": "SCANNED",
-  "message": "File uploaded to Votiro: Manual.pdf",
+  "message": "File submitted to Votiro: Manual.pdf",
   "status": "COMPLETED",
   "detail": {
     "file_name": "Manual.pdf",
     "correlation_id": "votiro-corr-xyz789",
     "file_size": 2048000,
-    "execution_time_ms": 2650,
-    "polling_attempts": 3
+    "execution_time_ms": 150,
+    "polling_max_attempts": 30
+  },
+  "created_at": "2026-05-03 13:00:00.050"
+}
+```
+
+**3. EventDispatcher receives DocumentScanStarted:**
+- Resolves DocumentHandler as handler
+- Executes DocumentHandler.ExecuteHandlerAsync()
+- DocumentHandler starts async polling loop
+
+**4. DocumentHandler polls Votiro (async, background task):**
+```
+Loop every N seconds (max 30 attempts):
+  - GetDocumentScan(correlationId) from DB
+  - Check if scan complete
+  - If complete: GetScanResultAsync(correlationId) from Votiro
+  - Update DB with result
+  - Break loop
+```
+
+**5. DocumentScanCompleted Event (emitted after polling completes):**
+```json
+{
+  "event_id": "e-scan-complete-789",
+  "event_type": "DocumentScanCompleted",
+  "asset_master_id": "asset-001",
+  "attachment_id": "att-001",
+  "correlation_id": "votiro-corr-xyz789",
+  "scan_status": "CLEAN",
+  "threat_detected": false,
+  "polling_attempts": 3,
+  "created_at": "2026-05-03 13:00:02.650"
+}
+```
+
+**6. DocumentHandler logs scan completion:**
+```json
+{
+  "id": "audit-402",
+  "asset_master_id": "asset-001",
+  "event_id": "e-scan-complete-789",
+  "handler": "DocumentHandler",
+  "change_type": "SCANNED",
+  "message": "Scan complete: Manual.pdf is CLEAN",
+  "status": "COMPLETED",
+  "detail": {
+    "file_name": "Manual.pdf",
+    "correlation_id": "votiro-corr-xyz789",
+    "scan_status": "CLEAN",
+    "threat_detected": false,
+    "polling_attempts": 3,
+    "total_time_ms": 2650,
+    "result": "success"
   },
   "created_at": "2026-05-03 13:00:02.700"
 }
 ```
 
-**After scan completes:**
+**7. EventDispatcher receives DocumentScanCompleted:**
+- Resolves NotificationHandler as handler
+- Executes NotificationHandler.ExecuteHandlerAsync()
+
+**8. NotificationHandler sends to UI:**
 ```json
 {
-  "id": "audit-402",
+  "id": "audit-403",
   "asset_master_id": "asset-001",
-  "event_id": "e345",
+  "event_id": "e-scan-complete-789",
   "handler": "NotificationHandler",
   "change_type": "NOTIFIED",
   "message": "Scan complete: Manual.pdf is CLEAN",
@@ -319,18 +389,29 @@ No separate table to join!
   "detail": {
     "channel": "UI_PUSH",
     "threat_detected": false,
-    "execution_time_ms": 25
+    "execution_time_ms": 25,
+    "result": "success"
   },
   "created_at": "2026-05-03 13:00:02.750"
 }
 ```
 
-**Complete audit trail for document:**
+**Complete audit trail for document scan:**
 ```sql
-SELECT handler, change_type, message, detail
+SELECT handler, change_type, message, detail->>'polling_attempts' as attempts, created_at
 FROM asset_audit
-WHERE event_id = 'e345'
+WHERE asset_master_id = 'asset-001' 
+  AND change_type IN ('SCANNED', 'NOTIFIED')
 ORDER BY created_at ASC;
+
+RESULT:
+┌────────────────┬───────────┬─────────────────────────────────────┬──────────┬──────────────┐
+│ handler        │ change_type │ message                             │ attempts │ created_at   │
+├────────────────┼───────────┼─────────────────────────────────────┼──────────┼──────────────┤
+│ DocumentHandler │ SCANNED    │ File submitted to Votiro: Manual.pdf│ null     │ 13:00:00.050 │
+│ DocumentHandler │ SCANNED    │ Scan complete: Manual.pdf is CLEAN │ 3        │ 13:00:02.700 │
+│ NotificationHandler │ NOTIFIED │ Scan complete: Manual.pdf is CLEAN │ null     │ 13:00:02.750 │
+└────────────────┴───────────┴─────────────────────────────────────┴──────────┴──────────────┘
 ```
 
 ---
