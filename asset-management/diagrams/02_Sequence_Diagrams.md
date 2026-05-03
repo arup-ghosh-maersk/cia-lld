@@ -246,6 +246,6 @@ sequenceDiagram
     ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
     NH->>Audit: LogNotification(handler="NotificationHandler", result)
     Audit-->>NH: Logged
-    NH->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
+    NH->>UI: SignalR: "Manual.pdf scan complete"
     UI-->>User: Display result
 ```
