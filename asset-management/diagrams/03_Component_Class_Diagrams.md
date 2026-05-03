@@ -26,7 +26,6 @@ graph LR
         subgraph "External Services"
             VOTIRO[Votiro CDR API]
             EMAIL[Email Service]
-            STORAGE[File Storage]
         end
 
         subgraph "Databases"
@@ -54,14 +53,13 @@ graph LR
     SIGNALR -->|Display| UI
 
     UI -->|Upload File| API
-    API -->|Store & Scan| DH
-    DH -->|Quarantine| STORAGE
-    DH -->|Submit| VOTIRO
+    API -->|Upload & Scan| DH
+    DH -->|Direct Upload + Get CorrelationId| VOTIRO
+    DH -->|Poll for Result| VOTIRO
     DH -->|Webhook Callback| WEBHOOK
     WEBHOOK -->|Dispatch| NH
     DH -->|Log Scan| AUDITDB
-    VOTIRO -->|Result| DH
-    DH -->|Move to Secure| STORAGE
+    DH -->|Notify| NH
 
     AB -->|Query| ASSETDB
     AUDITDB -->|Store Logs| ASSETDB
@@ -76,29 +74,51 @@ graph LR
 
 ---
 
-## 2. AssetEventHandler Class Diagram
+## 2. Handler Base Architecture
 
 ```mermaid
 classDiagram
-    class EventHandler {
+    class BaseHandler {
         <<abstract>>
         -eventBus: IEventBus
         -logger: ILogger
-        -database: IRepository
-        +HandleAsync(event) Task
-        #LogEvent(msg) void
+        -auditRepository: IAuditRepository
+        #HandleAsync(event) Task
+        #LogAudit(handlerName, message, detail) Task
+        #PublishEvent(event) Task
+        #NotifyOnCompletion(notification) Task
     }
 
     class AssetEventHandler {
-        -auditRepository: IAuditRepository
         -notificationHandler: INotificationHandler
         +HandleAsync(event) Task
-        -GenerateAuditMessage(event) string
         -HandleAssetCreate(event) Task
         -HandleAssetUpdate(event) Task
         -HandleAssetDelete(event) Task
         -ExtractModifiedFields(before, after) List~string~
     }
+
+    class NotificationHandler {
+        -channels: Dictionary~Channel, INotificationChannel~
+        -notificationLogRepository: IRepository
+        +HandleAsync(request) Task
+        -ResolveChannels(recipients) List~Channel~
+        -DispatchToChannels(msg, recipients) Task
+    }
+
+    class DocumentHandler {
+        -votiroService: IVotiroService
+        -attachmentRepository: IRepository
+        -documentScanRepository: IRepository
+        +HandleAsync(file, metadata) Task
+        -SubmitForScanAsync(file) Task~string~
+        -PollScanResultAsync(correlationId) Task
+        -HandleScanCompletion(result) Task
+    }
+
+    BaseHandler <|-- AssetEventHandler
+    BaseHandler <|-- NotificationHandler
+    BaseHandler <|-- DocumentHandler
 
     class AssetEvent {
         -eventId: Guid
@@ -106,32 +126,22 @@ classDiagram
         -eventDetails: JsonObject
         -createdAt: DateTime
         -createdBy: string
-        +GetAssetId() Guid
-        +GetEventType() EventType
     }
 
     class AuditRecord {
-        -notificationId: Guid
-        -eventId: Guid
+        -auditId: Guid
+        -handlerName: string
+        -referenceId: Guid
         -auditMessage: string
         -detail: JsonObject
         -status: AuditStatus
         -createdAt: DateTime
-        +MarkDispatched() void
-        +MarkFailed(reason) void
     }
 
-    class NotificationRequest {
-        -notificationId: Guid
-        -message: string
-        -recipients: List~string~
-        -priority: Priority
-    }
-
-    EventHandler <|-- AssetEventHandler
     AssetEventHandler --> AssetEvent
     AssetEventHandler --> AuditRecord
-    AssetEventHandler --> NotificationRequest
+    NotificationHandler --> AuditRecord
+    DocumentHandler --> AuditRecord
 ```
 
 ---
@@ -143,11 +153,10 @@ classDiagram
     class NotificationHandler {
         -channels: Dictionary~Channel, INotificationChannel~
         -notificationLogRepository: IRepository
-        +DispatchAsync(request) Task
+        +HandleAsync(request) Task
         -ResolveChannels(recipients) List~Channel~
         -SendToUIAsync(msg, recipient) Task
         -SendEmailAsync(msg, recipient) Task
-        -SendWebhookAsync(msg, endpoint) Task
     }
 
     class INotificationChannel {
@@ -169,13 +178,6 @@ classDiagram
         +GetChannelType() Channel
     }
 
-    class WebhookNotificationChannel {
-        -httpClient: HttpClient
-        -retryPolicy: IRetryPolicy
-        +SendAsync(message, endpoint) Task~bool~
-        +GetChannelType() Channel
-    }
-
     class NotificationLog {
         -id: Guid
         -notificationId: Guid
@@ -193,84 +195,94 @@ classDiagram
     NotificationHandler --> INotificationChannel
     INotificationChannel <|-- UINotificationChannel
     INotificationChannel <|-- EmailNotificationChannel
-    INotificationChannel <|-- WebhookNotificationChannel
     NotificationHandler --> NotificationLog
 ```
 
 ---
 
-## 4. DocumentHandler Class Diagram
+## 4. DocumentHandler & Votiro Integration
 
 ```mermaid
 classDiagram
     class DocumentHandler {
-        -fileStorage: IFileStorageService
-        -scanService: IScanService
+        -votiroService: IVotiroService
         -attachmentRepository: IRepository
         -documentScanRepository: IRepository
         -notificationHandler: INotificationHandler
         +UploadAndScanAsync(file, metadata) Task~Attachment~
-        -StoreQuarantineFile(file) Task~string~
-        -SubmitForScanAsync(attachmentId, filePath) Task
-        -HandleScanResultAsync(scanResult) Task
-        -MoveToSecureStorageAsync(filePath, assetId) Task~string~
+        -SubmitForScanAsync(file, metadata) Task~string~
+        -PollScanStatusAsync(correlationId) Task~ScanResult~
+        -HandleScanCompletion(result) Task
+        -NotifyScanResult(attachment, result) Task
     }
 
-    class VotiroScanService {
-        <<implements IScanService>>
+    class IVotiroService {
+        <<interface>>
+        +SubmitFileAsync(file, metadata) Task~VotiroResponse~
+        +GetScanResultAsync(correlationId) Task~ScanResult~
+    }
+
+    class VotiroService {
+        <<implements IVotiroService>>
         -apiClient: HttpClient
         -apiKey: string
-        +SubmitScanAsync(filePath, referenceId) Task~string~
-        +GetScanResultAsync(scanReferenceId) Task~ScanResult~
-        +RegisterWebhookAsync(url) Task
+        -baseUrl: string
+        +SubmitFileAsync(file, metadata) Task~VotiroResponse~
+        +GetScanResultAsync(correlationId) Task~ScanResult~
+        -BuildAuthHeaders() Dictionary~string, string~
     }
 
-    class FileStorageService {
-        <<implements IFileStorageService>>
-        -quarantinePath: string
-        -documentPath: string
-        +SaveQuarantineAsync(file, tempId) Task~string~
-        +MoveFromQuarantineAsync(tempPath, targetPath) Task~string~
-        +DeleteAsync(filePath) Task
-        +GetFileStreamAsync(filePath) Task~Stream~
+    class VotiroResponse {
+        -correlationId: string
+        -status: string
+        -message: string
+        -timestamp: DateTime
+    }
+
+    class ScanResult {
+        -correlationId: string
+        -status: ScanStatus
+        -threatDetected: bool
+        -threatName: string
+        -scanDuration: TimeSpan
+        -processedAt: DateTime
     }
 
     class Attachment {
         -id: Guid
         -fileName: string
-        -filePath: string
         -mimeType: string
-        -category: AttachmentCategory
         -fileSize: long
+        -correlationId: string
         -scanStatus: ScanStatus
+        -scanResult: string
+        -assetId: Guid
         +UpdateScanStatus(status) void
-        +SetFilePath(path) void
+        +SetCorrelationId(id) void
+        +MarkScanned(result) void
     }
 
     class DocumentScan {
         -id: Guid
         -attachmentId: Guid
-        -scanEngine: string
+        -correlationId: string
         -scanStatus: ScanStatus
         -scanResultDetail: string
-        -sanitizedFilePath: string
-        -scanReferenceId: string
-        +MarkClean(sanitizedPath) void
-        +MarkInfected(threatName) void
-        +MarkFailed(reason) void
-    }
-
-    class ScanResult {
-        -referenceId: string
-        -status: ScanStatus
+        -threatDetected: bool
         -threatName: string
-        -sanitizedFilePath: string
-        -scanDuration: TimeSpan
+        -pollingAttempts: int
+        -lastPolledAt: DateTime
+        +MarkClean() void
+        +MarkThreatDetected(threat) void
+        +MarkFailed(reason) void
+        +IncrementPollingAttempt() void
     }
 
-    DocumentHandler --> VotiroScanService
-    DocumentHandler --> FileStorageService
+    DocumentHandler --> IVotiroService
     DocumentHandler --> Attachment
     DocumentHandler --> DocumentScan
-    VotiroScanService --> ScanResult
+    DocumentHandler --> VotiroResponse
+    IVotiroService --> VotiroResponse
+    IVotiroService --> ScanResult
+    DocumentScan --> ScanResult
 ```
