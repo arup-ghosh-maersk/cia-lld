@@ -14,8 +14,7 @@ sequenceDiagram
     participant API as Asset API
     participant AB as Asset Business Service
     participant DB as Database
-    participant ES as EventStore
-    participant ED as EventDispatcher
+    participant ES as EventStore    participant ED as EventDispatcher
     participant AEH as AssetEventHandler
     participant Audit as AuditStore
     participant Push as Notification
@@ -39,15 +38,15 @@ sequenceDiagram
     AEH->>Audit: LogAudit(assetCreated, handler="AssetEventHandler", detail={...})
     Audit-->>AEH: AuditRecord Created
     AEH->>Push: NotifyOnCompletion()
-    Push-->>UI: Push - Asset ASSET001 Created
+    Push-->>UI: Push — "Asset ASSET001 Created"
     AEH-->>ED: Handler Complete
-` + "``````" + `
+```
 
 ---
 
 ## 2. Asset Update with Event Dispatch
 
-` + "``````" + `mermaid
+```mermaid
 sequenceDiagram
     autonumber
     actor User
@@ -75,7 +74,7 @@ sequenceDiagram
     Note over ES,Push: Async Event Dispatch Processing
     ES->>ED: PublishEvent(AssetUpdated)
     ED->>ED: ResolveHandlers(event)
-    par AssetEventHandler
+      par AssetEventHandler
         ED->>AEH: ExecuteHandlerAsync(event)
         AEH->>AEH: ExtractModifiedFields(before, after)
         AEH->>Audit: LogAudit(fieldChanges, handler="AssetEventHandler")
@@ -89,15 +88,15 @@ sequenceDiagram
         NH->>Audit: LogNotification(handler="NotificationHandler", channels=[...])
         NH-->>ED: Handler Complete
     end
-
-    Push-->>UI: Push - Asset ASSET001 Updated
-` + "``````" + `
+    
+    Push-->>UI: Push — "Asset ASSET001 Updated"
+```
 
 ---
 
 ## 3. EventDispatcher Coordination
 
-` + "``````" + `mermaid
+```mermaid
 sequenceDiagram
     autonumber
     participant ES as AssetEventStore
@@ -106,7 +105,7 @@ sequenceDiagram
     participant NH as NotificationHandler
     participant DH as DocumentHandler
     participant AA as AuditStore
-
+    
     ES->>ED: PublishEvent(event)
     ED->>ED: ResolveHandlers(event)
     Note over ED: Check CanHandle() for each handler
@@ -130,13 +129,13 @@ sequenceDiagram
 
     ED-->>ES: Dispatch Complete
     Note over AA: All audit activities logged to ASSET_AUDIT
-` + "``````" + `
+```
 
 ---
 
 ## 4. Notification Handler Multi-Channel Dispatch
 
-` + "``````" + `mermaid
+```mermaid
 sequenceDiagram
     autonumber
     participant ED as EventDispatcher
@@ -153,7 +152,7 @@ sequenceDiagram
 
     par UI Push
         NH->>SIGNALR: SendAsync(message, recipient)
-        SIGNALR->>UI: SignalR Push - Asset ASSET001 Updated
+        SIGNALR->>UI: SignalR Push — "Asset ASSET001 Updated"
         UI-->>SIGNALR: Acknowledged
         SIGNALR->>NL: LogNotification(handler="NotificationHandler", channel="UI_PUSH")
         NL-->>SIGNALR: Logged
@@ -168,13 +167,13 @@ sequenceDiagram
     end
 
     NH-->>ED: All channels dispatched
-` + "``````" + `
+```
 
 ---
 
 ## 5. Document Upload & Direct Votiro Scan
 
-` + "``````" + `mermaid
+```mermaid
 sequenceDiagram
     autonumber
     actor User
@@ -194,7 +193,7 @@ sequenceDiagram
 
     DH->>VOTIRO: SubmitFileAsync(file, metadata)
     VOTIRO-->>DH: VotiroResponse {correlationId}
-
+    
     DH->>DB: CreateAttachment {fileName, correlationId, status=Pending}
     DB-->>DH: Attachment Created
     DH->>DB: CreateDocumentScan {correlationId, status=Submitted}
@@ -203,10 +202,10 @@ sequenceDiagram
     Note over DH,ES: Emit Document Scan Event
     DH->>ES: EmitEvent(DocumentScanStarted, correlationId)
     ES-->>API: Event Stored, EventId
-
+    
     DH-->>API: Submitted for Scan
     API-->>UI: 202 Accepted {attachmentId, correlationId}
-    UI-->>User: File submitted for scanning...
+    UI-->>User: ⏳ "File submitted for scanning..."
 
     Note over ES,ED: EventDispatcher triggers DocumentHandler polling
     ES->>ED: PublishEvent(DocumentScanStarted, correlationId)
@@ -217,15 +216,14 @@ sequenceDiagram
     loop Poll Every N Seconds (Max 30)
         DH->>DB: GetDocumentScan(correlationId)
         DB-->>DH: DocumentScan {status, pollingAttempts}
-
+        
         opt Scan Complete
             DH->>VOTIRO: GetScanResultAsync(correlationId)
             VOTIRO-->>DH: ScanResult {status, threat}
-
+            
             alt Threat Detected
                 DH->>DB: UpdateAttachment {status=ThreatDetected}
-                DH->>DB: UpdateDocumentScan {status=ThreatDetected}
-            else Clean
+                DH->>DB: UpdateDocumentScan {status=ThreatDetected}            else Clean
                 DH->>DB: UpdateAttachment {status=Clean}
                 DH->>DB: UpdateDocumentScan {status=Clean}
             else Failed
@@ -238,7 +236,7 @@ sequenceDiagram
     Note over DH,ES: Emit Scan Completion Event
     DH->>ES: EmitEvent(DocumentScanCompleted, result)
     ES-->>DH: Event Stored
-
+    
     DH->>Audit: LogScan(handler="DocumentHandler", scan_result)
     Audit-->>DH: Logged
 
@@ -248,6 +246,6 @@ sequenceDiagram
     ED->>NH: ExecuteHandlerAsync(DocumentScanCompleted)
     NH->>Audit: LogNotification(handler="NotificationHandler", result)
     Audit-->>NH: Logged
-    NH->>UI: SignalR - Scan complete for Manual.pdf
+    NH->>UI: SignalR: ✅/❌ "Manual.pdf scan complete"
     UI-->>User: Display result
-` + "``````" + `
+```
