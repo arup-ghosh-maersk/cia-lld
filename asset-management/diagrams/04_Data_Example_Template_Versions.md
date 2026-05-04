@@ -1,6 +1,6 @@
 # Asset Master — Data Organization Example with Template Versions
 
-> **Purpose:** Demonstrates how data flows through the normalized ER schema when templates are versioned and assets are reused across versions instead of duplicated.
+> **Purpose:** Demonstrates how data flows through the normalized ER schema when templates are versioned and assets are reused across versions instead of duplicated. 
 
 ---
 
