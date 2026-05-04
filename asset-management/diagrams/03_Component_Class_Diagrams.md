@@ -8,8 +8,8 @@
 
 ```mermaid
 classDiagram
-    class AssetTemplate {
-        +UUID templateId
+    class GosBaseTemplate {
+        +UUID id
         +String gosObjectType
         +String gosObjectId
         +String gosLv1Code
@@ -22,13 +22,11 @@ classDiagram
         +String gosFunctionalType
         +String gosEquipmentType
         +String gosHierarchyPath
-        +Int gosHierarchyLevel
-        +String gosPresentObjectId
         +Bool gosIsTool
-        +String templateName
+        +String displayName
         +String status
-        +DateTime createdAt
-        +Validate() bool
+        +IsRoot() bool
+        +GetChildren() List~GosBaseTemplate~
     }
 
     class GosCategory {
@@ -47,6 +45,33 @@ classDiagram
         STRUCTURAL
     }
 
+    class AssetTemplate {
+        +UUID id
+        +UUID gosBaseTemplateId
+        +UUID parentTemplateId
+        +String templateCode
+        +String templateName
+        +String oemManufacturer
+        +String oemModel
+        +String oemVersion
+        +Bool isLatestVersion
+        +Date effectiveFrom
+        +Date effectiveTo
+        +String status
+        +Dict specifications
+        +IsActive() bool
+        +GetPreviousVersion() AssetTemplate
+        +CloneAsNewVersion() AssetTemplate
+    }
+
+    class TemplateStatus {
+        <<enumeration>>
+        DRAFT
+        ACTIVE
+        DEPRECATED
+        RETIRED
+    }
+
     class Asset {
         +UUID assetId
         +UUID templateId
@@ -57,11 +82,13 @@ classDiagram
         +String manufacturer
         +String model
         +String location
+        +String department
         +String ownerUserId
         +DateTime installationDate
         +DateTime commissioningDate
         +Decimal acquisitionCost
         +AssetStatus status
+        +Boolean isActive
         +DateTime createdAt
         +DateTime updatedAt
         +Validate() bool
@@ -72,7 +99,6 @@ classDiagram
         <<enumeration>>
         ACTIVE
         INACTIVE
-        ARCHIVED
         RETIRED
         MAINTENANCE
     }
@@ -123,8 +149,12 @@ classDiagram
         TIMEOUT
     }
 
-    AssetTemplate --> GosCategory
-    AssetTemplate --> GosFunctionalType
+    GosBaseTemplate --> GosCategory
+    GosBaseTemplate --> GosFunctionalType
+    GosBaseTemplate "1" -- "*" GosBaseTemplate : parent_of
+    GosBaseTemplate "1" -- "*" AssetTemplate : extended_by
+    AssetTemplate --> TemplateStatus
+    AssetTemplate "1" -- "*" AssetTemplate : versioned_as
     AssetTemplate "1" -- "*" Asset : instantiated_as
     Asset "1" -- "*" Attachment : contains
     Attachment "1" -- "*" DocumentScan : scanned_by
