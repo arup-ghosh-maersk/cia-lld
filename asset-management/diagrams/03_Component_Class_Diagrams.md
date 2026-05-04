@@ -8,41 +8,8 @@
 
 ```mermaid
 classDiagram
-    class AssetTemplate {
+    class GosRegister {
         +UUID id
-        +TemplateType templateType
-        +String templateCode
-        +String templateName
-        +String description
-        +TemplateStatus status
-        +UUID gosParentId
-        +UUID gosBaseId
-        +UUID parentVersionId
-        +IsGosBase() bool
-        +IsOemTemplate() bool
-        +GetGosBase() AssetTemplate
-        +GetPreviousVersion() AssetTemplate
-        +CloneAsNewVersion() AssetTemplate
-        +GetLatestVersion() AssetTemplate
-    }
-
-    class TemplateType {
-        <<enumeration>>
-        GOS_BASE
-        OEM_TEMPLATE
-    }
-
-    class TemplateStatus {
-        <<enumeration>>
-        ACTIVE
-        INACTIVE
-        DEPRECATED
-        DRAFT
-        RETIRED
-    }
-
-    class GosFields {
-        <<interface>>
         +String gosObjectType
         +String gosObjectId
         +String gosLv1Code
@@ -55,40 +22,82 @@ classDiagram
         +String gosFunctionalType
         +String gosEquipmentType
         +String gosHierarchyPath
-        +Boolean gosIsTool
+        +Bool gosIsTool
+        +String displayName
+        +String status
+        +IsRoot() bool
+        +GetChildren() List~GosRegister~
+        +GetAncestors() List~GosRegister~
     }
 
-    class OemFields {
-        <<interface>>
+    class GosCategory {
+        <<enumeration>>
+        EQ
+        TOOL
+        CIV
+        FUEL
+    }
+
+    class OemTemplate {
+        +UUID id
+        +UUID gosRegisterId
+        +String templateCode
+        +String templateName
         +String oemManufacturer
         +String oemModel
-        +String oemVersion
-        +Boolean isLatestVersion
+        +String status
+        +GetLatestVersion() OemTemplateVersion
+        +GetVersion(versionNumber Int) OemTemplateVersion
+        +CreateNewVersion() OemTemplateVersion
+    }
+
+    class OemTemplateVersion {
+        +UUID id
+        +UUID oemTemplateId
+        +UUID parentVersionId
+        +String versionCode
+        +Int versionNumber
+        +Bool isLatestVersion
         +Date effectiveFrom
         +Date effectiveTo
-        +String changeSummary
+        +String status
         +Dict specifications
+        +GetPreviousVersion() OemTemplateVersion
+        +CloneAsNewVersion() OemTemplateVersion
+        +IsActive() bool
+    }
+
+    class VersionStatus {
+        <<enumeration>>
+        DRAFT
+        ACTIVE
+        DEPRECATED
+        RETIRED
     }
 
     class Asset {
         +UUID assetId
-        +UUID templateId
+        +UUID templateVersionId
+        +UUID parentAssetId
+        +Int hierarchyLevel
         +String assetCode
         +String assetName
         +String description
+        +String assetType
         +String serialNumber
         +String manufacturer
         +String model
         +String location
-        +String department
         +String ownerUserId
         +DateTime installationDate
         +DateTime commissioningDate
         +Decimal acquisitionCost
         +AssetStatus status
+        +CreationMode creationMode
         +Boolean isActive
         +Validate() bool
         +ToDTO() AssetDTO
+        +CanCreateChildAsset() bool
     }
 
     class AssetStatus {
@@ -97,6 +106,12 @@ classDiagram
         INACTIVE
         RETIRED
         MAINTENANCE
+    }
+
+    class CreationMode {
+        <<enumeration>>
+        TEMPLATE_BASED
+        AD_HOC
     }
 
     class Attachment {
@@ -145,19 +160,20 @@ classDiagram
         TIMEOUT
     }
 
-    AssetTemplate --> TemplateType
-    AssetTemplate --> TemplateStatus
-    AssetTemplate ..|> GosFields : when GOS_BASE
-    AssetTemplate ..|> OemFields : when OEM_TEMPLATE
-    AssetTemplate "1" -- "*" AssetTemplate : gos_parent_of
-    AssetTemplate "1" -- "*" AssetTemplate : extended_as_oem
-    AssetTemplate "1" -- "*" AssetTemplate : versioned_as
-    AssetTemplate "1" -- "*" Asset : instantiated_as
+    GosRegister --> GosCategory
+    GosRegister "1" -- "*" GosRegister : parent_of
+    GosRegister "1" -- "*" OemTemplate : extended_by
+    OemTemplate "1" -- "*" OemTemplateVersion : has_versions
+    OemTemplateVersion --> VersionStatus
+    OemTemplateVersion "1" -- "*" OemTemplateVersion : versioned_as
+    OemTemplateVersion "0..1" -- "*" Asset : may_instantiate
+    Asset --> AssetStatus
+    Asset --> CreationMode
+    Asset "1" -- "*" Asset : parent_of
     Asset "1" -- "*" Attachment : contains
     Attachment "1" -- "*" DocumentScan : scanned_by
     Attachment --> AttachmentStatus
     DocumentScan --> ScanStatus
-    Asset --> AssetStatus
 ```
 
 ---
