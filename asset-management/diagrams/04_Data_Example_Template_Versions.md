@@ -6,33 +6,141 @@
 
 ## Scenario Overview
 
-- **GOS Register:** RTG (Rubber-tired Gantry) at port AG.02.131.100
+- **GOS Register:** RTG (Rubber-tired Gantry) at port AG.02.131.100 — single source of truth, no duplication
 - **OEM Templates:** Konecranes RTG Electric with 2 versions (V1 → V2)
-- **Assets:** Create RTG-100 from V1 in 2022, upgrade to V2 in 2023 without duplicating the asset row
+- **V1 Scope:** GOS hierarchy up to Level 300 only
+- **V2 Scope:** GOS hierarchy extended to Level 400 (new node added)
+- **Assets:** RTG-100 from V1 sees only Levels 200–300; RTG-200 from V2 sees Levels 200–400
+- **Key:** `TEMPLATE_VERSION_GOS` junction table controls which GOS nodes each version exposes — no GOS rows duplicated
 
 ---
 
 ## Sample Data Tables
 
-### GOS_REGISTER (Immutable GOS Hierarchy)
+### GOS_REGISTER (Single Source of Truth — Never Duplicated)
 
-**Purpose:** Single source of truth for GOS object classifications. Loaded once from GOS CSV, never duplicated.
+> All GOS levels exist here once. No row is added or removed when a new template version is created.
 
-| id | parent_id | gos_object_type | gos_object_id | gos_hierarchy_path | display_name | status |
-|----|-----------|-----------------|---------------|--------------------|--------------|--------|
-| g1 | null | AG | AG | AG | All Gantries | active |
-| g2 | g1 | AG | AG.02 | AG.02 | Port 02 Terminal | active |
-| g3 | g2 | AG | AG.02.131.100 | AG.02.131.100 | RTG Electric Slot 100 | active |
+| id  | parent_id | gos_object_id   | gos_hierarchy_path | display_name          | gos_object_level | status |
+|-----|-----------|-----------------|--------------------|-----------------------|------------------|--------|
+| g1  | null      | AG              | AG                 | All Gantries          | 200              | active |
+| g2  | g1        | AG.02           | AG.02              | Port 02 Terminal      | 300              | active |
+| g3  | g2        | AG.02.131       | AG.02.131          | RTG Electric Slot     | 400              | active |
+
+> `g3` (Level 400) was **added to GOS_REGISTER when the new level was defined globally**. It exists in the registry for both V1 and V2 timeframes — but only V2 references it via `TEMPLATE_VERSION_GOS`.
 
 ---
 
-### OEM_TEMPLATE (Manufacturer/Model Catalog)
+### OEM_TEMPLATE
 
-**Purpose:** Links a GOS entry to an OEM manufacturer and model. One catalog entry per OEM+Model combination.
+| id  | gos_register_id | template_code   | oem_manufacturer | oem_model | status |
+|-----|-----------------|----------------|------------------|-----------|--------|
+| t1  | g1              | AG-KONE-RTG    | Konecranes       | RTG-E     | active |
 
-| id | gos_register_id | template_code | template_name | oem_manufacturer | oem_model | status |
-|----|-----------------|---------------|---------------|------------------|-----------|--------|
-| t1 | g3 | AG-KONE-RTG | Konecranes RTG Electric | Konecranes | RTG-E | active |
+> Template anchors to Level 200 (root GOS node). Versions control deeper scope.
+
+---
+
+### OEM_TEMPLATE_VERSION
+
+| id  | oem_template_id | parent_version_id | version_code | is_latest_version | effective_from | effective_to | status     |
+|-----|-----------------|-------------------|--------------|-------------------|----------------|--------------|------------|
+| v1  | t1              | null              | V1           | false             | 2022-01-01     | 2023-03-01   | deprecated |
+| v2  | t1              | v1                | V2           | true              | 2023-03-02     | null         | active     |
+
+---
+
+### TEMPLATE_VERSION_GOS (Junction — Controls Which GOS Nodes Each Version Exposes)
+
+> This is the key table. V1 only maps to g1, g2 (Levels 200 & 300). V2 additionally maps to g3 (Level 400). GOS_REGISTER itself is unchanged.
+
+| id    | oem_template_version_id | gos_register_id | is_root_node | is_visible | inclusion_reason |
+|-------|------------------------|-----------------|--------------|------------|------------------|
+| tvg-1 | v1                     | g1              | true         | true       | inherited        |
+| tvg-2 | v1                     | g2              | false        | true       | inherited        |
+| tvg-3 | v2                     | g1              | true         | true       | inherited        |
+| tvg-4 | v2                     | g2              | false        | true       | inherited        |
+| tvg-5 | v2                     | g3              | false        | true       | added            |
+
+**What this means:**
+- **V1** → only `g1` (Level 200) and `g2` (Level 300) are in scope. Level 400 (`g3`) is NOT visible.
+- **V2** → `g1`, `g2`, and `g3` (Level 400) are all in scope. Level 400 IS visible.
+- `g3` is never duplicated — it exists once in `GOS_REGISTER`, but only `v2` references it in `TEMPLATE_VERSION_GOS`.
+
+---
+
+### ASSET_MASTER
+
+| id  | gos_register_id | oem_template_version_id | asset_code | asset_name | creation_mode  | status |
+|-----|-----------------|------------------------|------------|------------|----------------|--------|
+| a1  | g1              | v1                     | RTG-100    | RTG Unit 1 | TEMPLATE_BASED | active |
+| a2  | g1              | v2                     | RTG-200    | RTG Unit 2 | TEMPLATE_BASED | active |
+
+---
+
+### What Each Asset Sees in the UI (GOS Hierarchy Traversal)
+
+| Asset | Template Version | GOS Levels Visible | Level 400 Visible? |
+|-------|-----------------|--------------------|--------------------|
+| RTG-100 (a1) | V1 | 200 → 300 | No |
+| RTG-200 (a2) | V2 | 200 → 300 → 400 | Yes |
+
+> The UI queries `TEMPLATE_VERSION_GOS` filtered by the asset's `oem_template_version_id` to build the hierarchy tree. This ensures each asset only sees the GOS levels its template version declared.
+
+---
+
+### SQL: Get GOS Hierarchy for a Specific Asset
+
+```sql
+-- Get all GOS nodes visible for asset RTG-100 (bound to V1)
+SELECT gr.gos_object_id, gr.display_name, gr.gos_object_level, tvg.is_visible
+FROM TEMPLATE_VERSION_GOS tvg
+JOIN GOS_REGISTER gr ON tvg.gos_register_id = gr.id
+JOIN ASSET_MASTER am ON am.oem_template_version_id = tvg.oem_template_version_id
+WHERE am.id = 'a1'
+  AND tvg.is_visible = true
+ORDER BY gr.gos_object_level;
+
+-- Result for RTG-100 (V1):
+-- AG      | All Gantries       | 200
+-- AG.02   | Port 02 Terminal   | 300
+-- (AG.02.131 / Level 400 NOT returned)
+
+-- Result for RTG-200 (V2):
+-- AG          | All Gantries       | 200
+-- AG.02       | Port 02 Terminal   | 300
+-- AG.02.131   | RTG Electric Slot  | 400
+```
+
+---
+
+### SQL: Create V2 — Copy V1 GOS Scope + Add New Level 400 Node
+
+```sql
+BEGIN;
+
+-- 1. Create the new template version
+INSERT INTO OEM_TEMPLATE_VERSION (id, oem_template_id, parent_version_id, version_code, version_number, is_latest_version, effective_from, status)
+VALUES ('v2', 't1', 'v1', 'V2', 2, true, '2023-03-02', 'active');
+
+-- 2. Deprecate V1
+UPDATE OEM_TEMPLATE_VERSION SET is_latest_version = false, effective_to = '2023-03-01', status = 'deprecated'
+WHERE id = 'v1';
+
+-- 3. Copy all V1 GOS scope into V2 (inherit existing nodes)
+INSERT INTO TEMPLATE_VERSION_GOS (id, oem_template_version_id, gos_register_id, is_root_node, is_visible, inclusion_reason)
+SELECT gen_random_uuid(), 'v2', gos_register_id, is_root_node, is_visible, 'inherited'
+FROM TEMPLATE_VERSION_GOS
+WHERE oem_template_version_id = 'v1';
+
+-- 4. Add the new Level 400 GOS node to V2 only
+INSERT INTO TEMPLATE_VERSION_GOS (id, oem_template_version_id, gos_register_id, is_root_node, is_visible, inclusion_reason)
+VALUES (gen_random_uuid(), 'v2', 'g3', false, true, 'added');
+
+COMMIT;
+```
+
+
 
 ---
 

@@ -7,15 +7,18 @@
 ## 1. Complete ER Diagram with Full Models
 
 > **Normalized Design:**
-> - **Phase 1 — GOS Registry:** `GOS_REGISTER` holds the authoritative GOS hierarchy (object types, levels, categories).
+> - **Phase 1 — GOS Registry:** `GOS_REGISTER` holds the authoritative GOS hierarchy (object types, levels, categories). It is immutable and never duplicated.
 > - **Phase 2 — OEM Templates:** `OEM_TEMPLATE` extends a GOS register entry; `OEM_TEMPLATE_VERSION` chains versions with specs, components, attachments.
+> - **Phase 3 — Version-Aware GOS Scope:** `TEMPLATE_VERSION_GOS` is a junction table that explicitly maps which `GOS_REGISTER` nodes (levels) each template version includes. This allows V1 to reference only Levels 200–300, and V2 to additionally include Level 400, without duplicating any GOS data.
 > - **Asset Creation Flexibility:** `ASSET_MASTER` can be created with or without a template. If template-based, it inherits defaults; if ad-hoc, all fields are manual.
 
 ```mermaid
 erDiagram
     GOS_REGISTER ||--o{ GOS_REGISTER : "parent_of"
     GOS_REGISTER ||--o{ OEM_TEMPLATE : "extended_by"
+    GOS_REGISTER ||--o{ TEMPLATE_VERSION_GOS : "included_in_version"
     OEM_TEMPLATE ||--o{ OEM_TEMPLATE_VERSION : "has_versions"
+    OEM_TEMPLATE_VERSION ||--o{ TEMPLATE_VERSION_GOS : "scopes_gos_nodes"
     OEM_TEMPLATE_VERSION ||--o{ TEMPLATE_COMPONENT : "includes"
     OEM_TEMPLATE_VERSION ||--o{ TEMPLATE_ATTACHMENT : "includes"
     OEM_TEMPLATE_VERSION ||--o{ TEMPLATE_ATTRIBUTE : "includes"
@@ -37,6 +40,18 @@ erDiagram
     TEMPLATE_ATTACHMENT ||--o{ MASTER_ATTACHMENT : "may_source_from"
     ASSET_EVENT_STORE ||--o{ ASSET_AUDIT : "produces"
     ASSET_AUDIT ||--o{ NOTIFICATION_LOG : "dispatched_as"
+
+    TEMPLATE_VERSION_GOS {
+        uuid id PK
+        uuid oem_template_version_id FK "Which template version"
+        uuid gos_register_id FK "Which GOS node is included"
+        boolean is_root_node "true = the top-level GOS node for this version"
+        boolean is_visible "Control UI visibility per version"
+        int display_order "Order in hierarchy tree for this version"
+        string inclusion_reason "added, inherited, removed"
+        uuid created_by
+        timestamp created_at
+    }
 
     GOS_REGISTER {
         uuid id PK "Authoritative GOS Registry Record"
