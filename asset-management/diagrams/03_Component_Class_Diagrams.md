@@ -8,16 +8,62 @@
 
 ```mermaid
 classDiagram
+    class AssetTemplate {
+        +UUID templateId
+        +String gosObjectType
+        +String gosObjectId
+        +String gosLv1Code
+        +String gosLv2Code
+        +String gosLv3Code
+        +String gosLv4Code
+        +String gosLv5Code
+        +Int gosObjectLevel
+        +String gosCategory
+        +String gosFunctionalType
+        +String gosEquipmentType
+        +String gosHierarchyPath
+        +Int gosHierarchyLevel
+        +String gosPresentObjectId
+        +Bool gosIsTool
+        +String templateName
+        +String status
+        +DateTime createdAt
+        +Validate() bool
+    }
+
+    class GosCategory {
+        <<enumeration>>
+        EQ
+        TOOL
+        CIV
+        FUEL
+    }
+
+    class GosFunctionalType {
+        <<enumeration>>
+        FUNCTIONAL
+        TOOL
+        SERIAL
+        STRUCTURAL
+    }
+
     class Asset {
         +UUID assetId
+        +UUID templateId
+        +String assetCode
         +String assetName
-        +String assetType
         +String description
+        +String serialNumber
+        +String manufacturer
+        +String model
         +String location
         +String ownerUserId
+        +DateTime installationDate
+        +DateTime commissioningDate
+        +Decimal acquisitionCost
+        +AssetStatus status
         +DateTime createdAt
         +DateTime updatedAt
-        +AssetStatus status
         +Validate() bool
         +ToDTO() AssetDTO
     }
@@ -28,6 +74,7 @@ classDiagram
         INACTIVE
         ARCHIVED
         RETIRED
+        MAINTENANCE
     }
 
     class Attachment {
@@ -35,8 +82,9 @@ classDiagram
         +UUID assetId
         +String fileName
         +String filePath
-        +String contentType
+        +String mimeType
         +Long fileSize
+        +String fileHash
         +AttachmentStatus status
         +DateTime uploadedAt
         +String uploadedBy
@@ -55,12 +103,14 @@ classDiagram
         +UUID scanId
         +UUID attachmentId
         +String correlationId
+        +String scanEngine
         +DateTime scanStartTime
         +DateTime scanEndTime
         +ScanStatus status
         +String threatName
         +String scanResult
         +Int32 pollingAttempts
+        +Int32 maxPollingAttempts
     }
 
     class ScanStatus {
@@ -73,6 +123,9 @@ classDiagram
         TIMEOUT
     }
 
+    AssetTemplate --> GosCategory
+    AssetTemplate --> GosFunctionalType
+    AssetTemplate "1" -- "*" Asset : instantiated_as
     Asset "1" -- "*" Attachment : contains
     Attachment "1" -- "*" DocumentScan : scanned_by
     Attachment --> AttachmentStatus
