@@ -8,8 +8,41 @@
 
 ```mermaid
 classDiagram
-    class GosBaseTemplate {
+    class AssetTemplate {
         +UUID id
+        +TemplateType templateType
+        +String templateCode
+        +String templateName
+        +String description
+        +TemplateStatus status
+        +UUID gosParentId
+        +UUID gosBaseId
+        +UUID parentVersionId
+        +IsGosBase() bool
+        +IsOemTemplate() bool
+        +GetGosBase() AssetTemplate
+        +GetPreviousVersion() AssetTemplate
+        +CloneAsNewVersion() AssetTemplate
+        +GetLatestVersion() AssetTemplate
+    }
+
+    class TemplateType {
+        <<enumeration>>
+        GOS_BASE
+        OEM_TEMPLATE
+    }
+
+    class TemplateStatus {
+        <<enumeration>>
+        ACTIVE
+        INACTIVE
+        DEPRECATED
+        DRAFT
+        RETIRED
+    }
+
+    class GosFields {
+        <<interface>>
         +String gosObjectType
         +String gosObjectId
         +String gosLv1Code
@@ -22,54 +55,19 @@ classDiagram
         +String gosFunctionalType
         +String gosEquipmentType
         +String gosHierarchyPath
-        +Bool gosIsTool
-        +String displayName
-        +String status
-        +IsRoot() bool
-        +GetChildren() List~GosBaseTemplate~
+        +Boolean gosIsTool
     }
 
-    class GosCategory {
-        <<enumeration>>
-        EQ
-        TOOL
-        CIV
-        FUEL
-    }
-
-    class GosFunctionalType {
-        <<enumeration>>
-        FUNCTIONAL
-        TOOL
-        SERIAL
-        STRUCTURAL
-    }
-
-    class AssetTemplate {
-        +UUID id
-        +UUID gosBaseTemplateId
-        +UUID parentTemplateId
-        +String templateCode
-        +String templateName
+    class OemFields {
+        <<interface>>
         +String oemManufacturer
         +String oemModel
         +String oemVersion
-        +Bool isLatestVersion
+        +Boolean isLatestVersion
         +Date effectiveFrom
         +Date effectiveTo
-        +String status
+        +String changeSummary
         +Dict specifications
-        +IsActive() bool
-        +GetPreviousVersion() AssetTemplate
-        +CloneAsNewVersion() AssetTemplate
-    }
-
-    class TemplateStatus {
-        <<enumeration>>
-        DRAFT
-        ACTIVE
-        DEPRECATED
-        RETIRED
     }
 
     class Asset {
@@ -89,8 +87,6 @@ classDiagram
         +Decimal acquisitionCost
         +AssetStatus status
         +Boolean isActive
-        +DateTime createdAt
-        +DateTime updatedAt
         +Validate() bool
         +ToDTO() AssetDTO
     }
@@ -149,11 +145,12 @@ classDiagram
         TIMEOUT
     }
 
-    GosBaseTemplate --> GosCategory
-    GosBaseTemplate --> GosFunctionalType
-    GosBaseTemplate "1" -- "*" GosBaseTemplate : parent_of
-    GosBaseTemplate "1" -- "*" AssetTemplate : extended_by
+    AssetTemplate --> TemplateType
     AssetTemplate --> TemplateStatus
+    AssetTemplate ..|> GosFields : when GOS_BASE
+    AssetTemplate ..|> OemFields : when OEM_TEMPLATE
+    AssetTemplate "1" -- "*" AssetTemplate : gos_parent_of
+    AssetTemplate "1" -- "*" AssetTemplate : extended_as_oem
     AssetTemplate "1" -- "*" AssetTemplate : versioned_as
     AssetTemplate "1" -- "*" Asset : instantiated_as
     Asset "1" -- "*" Attachment : contains

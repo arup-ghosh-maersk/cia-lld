@@ -6,13 +6,15 @@
 
 ## 1. Complete ER Diagram with Full Models
 
-> **Phase 1:** `GOS_BASE_TEMPLATE` seeds the registry from the GOS Register.
-> **Phase 2:** `ASSET_TEMPLATE` extends a base template for a specific OEM, model, and version. `ASSET_MASTER` is always instantiated from an `ASSET_TEMPLATE`.
+> **Single `ASSET_TEMPLATE` table** serves all tiers via `template_type` discriminator and two self-referencing FKs:
+> - **Phase 1 — GOS Base:** `template_type = GOS_BASE`. `gos_parent_id` maps the GOS hierarchy. OEM fields are null.
+> - **Phase 2 — OEM Template:** `template_type = OEM_TEMPLATE`. `gos_base_id` points to the GOS base record. `parent_version_id` chains versions (null for V1).
+> - **ASSET_MASTER** is always instantiated from an `OEM_TEMPLATE` record.
 
 ```mermaid
 erDiagram
-    GOS_BASE_TEMPLATE ||--o{ GOS_BASE_TEMPLATE : "parent_of"
-    GOS_BASE_TEMPLATE ||--o{ ASSET_TEMPLATE : "extended_by"
+    ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "gos_parent_of"
+    ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "extended_as_oem"
     ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "versioned_as"
     ASSET_TEMPLATE ||--o{ ASSET_MASTER : "instantiated_as"
     ASSET_TEMPLATE ||--o{ TEMPLATE_COMPONENT : "defines"
@@ -36,50 +38,38 @@ erDiagram
     ASSET_EVENT_STORE ||--o{ ASSET_AUDIT : "produces"
     ASSET_AUDIT ||--o{ NOTIFICATION_LOG : "dispatched_as"
 
-    GOS_BASE_TEMPLATE {
-        uuid id PK "GOS Register Base Record"
-        uuid parent_id FK "null for root - GOS hierarchy"
-        string gos_object_type UK "AG, AGV, AMS - Primary GOS identifier"
-        string gos_object_id UK "AG#####, AGV##### - Full GOS Object ID"
-        string gos_lv1_code "AG, AGV, AMS - Level 1"
-        string gos_lv2_code "02, 03, 09, 24, 27, 80, 99 - Level 2"
-        string gos_lv3_code "002, 010, 031, 083, 141, 213 - Level 3"
-        string gos_lv4_code "072, 100, 158, 200, 230 - Level 4"
-        string gos_lv5_code "119, P001, P002 - Level 5"
-        int gos_object_level "200=Lv1, 300=Lv2, 400=Lv3, 500=Lv4, 600=Lv5"
-        string gos_category "EQ, TOOL, CIV, FUEL"
-        string gos_functional_type "Functional, Tool, Serial, Structural"
-        string gos_equipment_type "Instrument, Electrical, Rotary, Static, Hydraulic, Structural"
-        string gos_hierarchy_path "AG.02.131.100"
-        int gos_hierarchy_level "1, 2, 3, 4, 5"
-        string gos_parent_object_id "Parent GOS Object ID"
-        boolean gos_is_tool "0=Equipment, 1=Tool"
-        string display_name "Human-readable name"
-        string description "GOS object description"
-        string status "active, inactive, deprecated"
-        jsonb gos_metadata "Additional GOS properties"
-        uuid created_by
-        timestamp created_at
-        uuid updated_by
-        timestamp updated_at
-    }
-
     ASSET_TEMPLATE {
-        uuid id PK "OEM Template ID"
-        uuid gos_base_template_id FK "Source GOS base record"
-        uuid parent_template_id FK "null for first version"
-        string template_code UK "e.g. AG-KONECRANES-RTG-V1"
-        string template_name "e.g. Konecranes RTG Electric V1"
-        string oem_manufacturer "Konecranes, ABB, Siemens, etc"
-        string oem_model "RTG-E, ACS880, etc"
-        string oem_version "V1, V2, V3"
-        boolean is_latest_version "true for current active version"
-        boolean is_base_version "true for first OEM template"
-        date effective_from "Template valid from"
-        date effective_to "null = still active"
-        string change_summary "What changed from parent version"
-        string status "draft, active, deprecated, retired"
-        jsonb specifications "OEM-specific technical specs"
+        uuid id PK
+        string template_type "GOS_BASE or OEM_TEMPLATE"
+        uuid gos_parent_id FK "GOS_BASE only: parent in GOS hierarchy, null for root"
+        uuid gos_base_id FK "OEM_TEMPLATE only: source GOS_BASE record"
+        uuid parent_version_id FK "OEM_TEMPLATE only: previous version, null for V1"
+        string template_code UK "GOS: gos_object_id | OEM: AG-KONECRANES-RTG-V1"
+        string template_name "GOS: display_name | OEM: Konecranes RTG Electric V1"
+        string description
+        string status "active, inactive, deprecated, draft, retired"
+        string gos_object_type "GOS_BASE: AG, AGV, AMS"
+        string gos_object_id "GOS_BASE: AG#####, AGV#####"
+        string gos_lv1_code "GOS_BASE: Level 1"
+        string gos_lv2_code "GOS_BASE: Level 2"
+        string gos_lv3_code "GOS_BASE: Level 3"
+        string gos_lv4_code "GOS_BASE: Level 4"
+        string gos_lv5_code "GOS_BASE: Level 5"
+        int gos_object_level "GOS_BASE: 200=Lv1 to 600=Lv5"
+        string gos_category "GOS_BASE: EQ, TOOL, CIV, FUEL"
+        string gos_functional_type "GOS_BASE: Functional, Tool, Serial, Structural"
+        string gos_equipment_type "GOS_BASE: Instrument, Electrical, Rotary, Static"
+        string gos_hierarchy_path "GOS_BASE: AG.02.131.100"
+        int gos_hierarchy_level "GOS_BASE: 1, 2, 3, 4, 5"
+        boolean gos_is_tool "GOS_BASE: 0=Equipment, 1=Tool"
+        string oem_manufacturer "OEM_TEMPLATE: Konecranes, ABB, Siemens"
+        string oem_model "OEM_TEMPLATE: RTG-E, ACS880"
+        string oem_version "OEM_TEMPLATE: V1, V2, V3"
+        boolean is_latest_version "OEM_TEMPLATE: true for current active version"
+        date effective_from "OEM_TEMPLATE: valid from"
+        date effective_to "OEM_TEMPLATE: null = still active"
+        string change_summary "OEM_TEMPLATE: what changed from parent version"
+        jsonb specifications "OEM_TEMPLATE: technical specs"
         jsonb metadata
         uuid created_by
         timestamp created_at
@@ -365,57 +355,45 @@ erDiagram
 
 ## 2. Core Asset Domain
 
-> Shows the three-tier hierarchy: **GOS Base → OEM Template (versioned) → Asset Instance**
+> Single `ASSET_TEMPLATE` table with `template_type` discriminator handles all tiers:
+> `GOS_BASE` records form the GOS hierarchy → `OEM_TEMPLATE` records extend a GOS base → `ASSET_MASTER` instances are created from OEM templates.
 
 ```mermaid
 erDiagram
-    GOS_BASE_TEMPLATE ||--o{ GOS_BASE_TEMPLATE : "parent_of"
-    GOS_BASE_TEMPLATE ||--o{ ASSET_TEMPLATE : "extended_by"
+    ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "gos_parent_of"
+    ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "extended_as_oem"
     ASSET_TEMPLATE ||--o{ ASSET_TEMPLATE : "versioned_as"
     ASSET_TEMPLATE ||--o{ ASSET_MASTER : "instantiated_as"
     ASSET_MASTER ||--o{ ASSET_MASTER : "parent_of"
 
-    GOS_BASE_TEMPLATE {
-        uuid id PK
-        uuid parent_id FK "null for root"
-        string gos_object_type UK "AG, AGV, AMS"
-        string gos_object_id UK "AG#####, AGV#####"
-        string gos_lv1_code "Level 1"
-        string gos_lv2_code "Level 2"
-        string gos_lv3_code "Level 3"
-        string gos_lv4_code "Level 4"
-        string gos_lv5_code "Level 5"
-        int gos_object_level "200=Lv1 to 600=Lv5"
-        string gos_category "EQ, TOOL, CIV, FUEL"
-        string gos_functional_type "Functional, Tool, Serial, Structural"
-        string gos_equipment_type "Instrument, Electrical, Rotary, Static"
-        string gos_hierarchy_path "AG.02.131.100"
-        boolean gos_is_tool "0=Equipment, 1=Tool"
-        string display_name
-        string status "active, inactive, deprecated"
-    }
-
     ASSET_TEMPLATE {
         uuid id PK
-        uuid gos_base_template_id FK "Source GOS base"
-        uuid parent_template_id FK "null = first version"
-        string template_code UK "AG-KONECRANES-RTG-V1"
-        string template_name "Konecranes RTG Electric V1"
-        string oem_manufacturer "Konecranes, ABB, Siemens"
-        string oem_model "RTG-E, ACS880"
-        string oem_version "V1, V2, V3"
-        boolean is_latest_version
-        date effective_from
-        date effective_to "null = still active"
-        string status "draft, active, deprecated, retired"
-        jsonb specifications "OEM-specific specs"
+        string template_type "GOS_BASE or OEM_TEMPLATE"
+        uuid gos_parent_id FK "GOS_BASE: parent GOS node, null=root"
+        uuid gos_base_id FK "OEM_TEMPLATE: source GOS_BASE id"
+        uuid parent_version_id FK "OEM_TEMPLATE: prev version, null=V1"
+        string template_code UK "GOS: gos_object_id | OEM: AG-KONECRANES-RTG-V1"
+        string template_name "GOS: display name | OEM: Konecranes RTG V1"
+        string status "active, inactive, deprecated, draft, retired"
+        string gos_object_type "GOS_BASE only"
+        string gos_object_id "GOS_BASE only"
+        string gos_category "GOS_BASE only: EQ, TOOL, CIV, FUEL"
+        string gos_hierarchy_path "GOS_BASE only: AG.02.131.100"
+        int gos_object_level "GOS_BASE only: 200=Lv1 to 600=Lv5"
+        boolean gos_is_tool "GOS_BASE only"
+        string oem_manufacturer "OEM_TEMPLATE only: Konecranes, ABB"
+        string oem_model "OEM_TEMPLATE only: RTG-E, ACS880"
+        string oem_version "OEM_TEMPLATE only: V1, V2, V3"
+        boolean is_latest_version "OEM_TEMPLATE only"
+        date effective_from "OEM_TEMPLATE only"
+        date effective_to "OEM_TEMPLATE only, null=active"
     }
 
     ASSET_MASTER {
         uuid id PK
-        uuid asset_template_id FK "OEM Template used"
+        uuid asset_template_id FK "Must be OEM_TEMPLATE type"
         uuid parent_asset_id FK "null for root"
-        string asset_code UK "Unique instance"
+        string asset_code UK
         string asset_name
         string serial_number
         string location
